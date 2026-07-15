@@ -11,7 +11,7 @@ ShellRoot {
         fullscreen: true
         implicitWidth: 1180
         implicitHeight: 663
-        title: "Precision Shell — Home V23"
+        title: "Precision Shell — Home V24"
         color: "#F6F1E8"
 
         readonly property real designWidth: 1180
@@ -254,9 +254,16 @@ ShellRoot {
 
             stdout: StdioCollector {
                 onStreamFinished: {
-                    const lines = text.trim().split("\\n")
-                    const radioState = lines.length > 0 ? lines[0].trim() : ""
-                    const connectionName = lines.length > 1 ? lines[1].trim() : ""
+                    const normalized = text.replace(/\r/g, "").trim()
+                    const lines = normalized.length > 0
+                        ? normalized.split("\n")
+                        : []
+                    const radioState = lines.length > 0
+                        ? lines[0].trim()
+                        : ""
+                    const connectionName = lines.length > 1
+                        ? lines.slice(1).join("\n").trim()
+                        : ""
 
                     desktop.wifiEnabled = radioState === "enabled"
                     desktop.wifiSsid = connectionName
@@ -290,6 +297,10 @@ ShellRoot {
                 }
 
                 desktop.wifiBusy = false
+
+                if (!wifiReader.running)
+                    wifiReader.running = true
+
                 wifiRefreshTimer.restart()
             }
         }
@@ -564,6 +575,7 @@ ShellRoot {
 
             wifiTargetEnabled = !wifiEnabled
             wifiBusy = true
+            wifiEnabled = wifiTargetEnabled
             wifiWriterError = ""
             wifiMessage = wifiTargetEnabled
                 ? "Enabling Wi-Fi..."
