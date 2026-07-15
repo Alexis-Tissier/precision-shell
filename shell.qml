@@ -11,7 +11,7 @@ ShellRoot {
         fullscreen: true
         implicitWidth: 1180
         implicitHeight: 663
-        title: "Precision Shell — Home V24"
+        title: "Precision Shell — Home V26"
         color: "#F6F1E8"
 
         readonly property real designWidth: 1180
@@ -51,6 +51,14 @@ ShellRoot {
         property string wifiMessage: ""
         property string wifiWriterError: ""
         property var wifiNetworks: []
+
+        property bool bluetoothEnabled: true
+        property bool bluetoothBusy: false
+        property bool bluetoothMenuOpen: false
+        property string bluetoothConnectedName: ""
+        property string bluetoothMessage: ""
+        property string bluetoothError: ""
+        property var bluetoothDevices: []
 
         readonly property var dayNames: [
             "Sunday", "Monday", "Tuesday", "Wednesday",
@@ -167,6 +175,7 @@ ShellRoot {
             // but hide only the three transient widgets.
             restoreWidgetsOnFocus = true
             wifiMenuOpen = false
+            bluetoothMenuOpen = false
             viewState = 1
         }
 
@@ -426,6 +435,168 @@ ShellRoot {
             }
         }
 
+        Process {
+            id: bluetoothReader
+            command: [
+                "bash",
+                "-lc",
+                "export LC_ALL=C; "
+                + "powered=$(bluetoothctl show 2>/dev/null "
+                + "| awk -F': ' '/Powered:/ {print $2; exit}'); "
+                + "printf 'POWER:%s\n' \"$powered\"; "
+                + "bluetoothctl devices Paired 2>/dev/null "
+                + "| sed 's/^Device /PAIRED:/'; "
+                + "bluetoothctl devices Connected 2>/dev/null "
+                + "| sed 's/^Device /CONNECTED:/'"
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const normalized = text.replace(/\r/g, "").trim()
+                    const lines = normalized.length > 0
+                        ? normalized.split("\n")
+                        : []
+                    const devicesByAddress = {}
+                    const connected = {}
+
+                    for (let index = 0; index < lines.length; index++) {
+                        const line = lines[index].trim()
+
+                        if (line.indexOf("POWER:") === 0) {
+                            desktop.bluetoothEnabled =
+                                line.substring(6).trim() === "yes"
+                            continue
+                        }
+
+                        if (line.indexOf("CONNECTED:") === 0) {
+                            const payload = line.substring(10).trim()
+                            const separator = payload.indexOf(" ")
+
+                            if (separator > 0) {
+                                const address = payload.substring(0, separator)
+                                connected[address] = true
+                            }
+
+                            continue
+                        }
+
+                        if (line.indexOf("PAIRED:") === 0) {
+                            const payload = line.substring(7).trim()
+                            const separator = payload.indexOf(" ")
+
+                            if (separator <= 0)
+                                continue
+
+                            const address = payload.substring(0, separator)
+                            const name = payload.substring(separator + 1).trim()
+
+                            devicesByAddress[address] = {
+                                "address": address,
+                                "name": name,
+                                "connected": false
+                            }
+                        }
+                    }
+
+                    const devices = []
+                    let connectedName = ""
+
+                    for (const address in devicesByAddress) {
+                        const device = devicesByAddress[address]
+                        device.connected = connected[address] === true
+
+                        if (device.connected && connectedName.length === 0)
+                            connectedName = device.name
+
+                        devices.push(device)
+                    }
+
+                    devices.sort(function(left, right) {
+                        if (left.connected !== right.connected)
+                            return left.connected ? -1 : 1
+
+                        return left.name.localeCompare(right.name)
+                    })
+
+                    desktop.bluetoothDevices = devices
+                    desktop.bluetoothConnectedName = connectedName
+
+                    if (!desktop.bluetoothEnabled) {
+                        desktop.bluetoothConnectedName = ""
+                    }
+                }
+            }
+        }
+
+        Process {
+            id: bluetoothPowerWriter
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    desktop.bluetoothError = text.trim()
+
+                    if (desktop.bluetoothError.length > 0)
+                        console.warn("Bluetooth power:", desktop.bluetoothError)
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                desktop.bluetoothBusy = false
+
+                if (exitCode !== 0) {
+                    desktop.bluetoothMessage =
+                        desktop.bluetoothError.length > 0
+                        ? desktop.bluetoothError
+                        : "Unable to change Bluetooth state"
+                } else {
+                    desktop.bluetoothMessage = desktop.bluetoothEnabled
+                        ? "Bluetooth enabled"
+                        : "Bluetooth disabled"
+                }
+
+                bluetoothRefreshTimer.restart()
+            }
+        }
+
+        Process {
+            id: bluetoothDeviceWriter
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    desktop.bluetoothError = text.trim()
+
+                    if (desktop.bluetoothError.length > 0)
+                        console.warn("Bluetooth device:", desktop.bluetoothError)
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                desktop.bluetoothBusy = false
+
+                if (exitCode !== 0) {
+                    desktop.bluetoothMessage =
+                        desktop.bluetoothError.length > 0
+                        ? desktop.bluetoothError
+                        : "Bluetooth action failed"
+                } else {
+                    desktop.bluetoothMessage = "Bluetooth updated"
+                }
+
+                bluetoothRefreshTimer.restart()
+            }
+        }
+
+        Timer {
+            id: bluetoothRefreshTimer
+            interval: 1100
+            repeat: false
+
+            onTriggered: {
+                if (!bluetoothReader.running)
+                    bluetoothReader.running = true
+            }
+        }
+
         function refreshSystemState() {
             if (!batteryReader.running)
                 batteryReader.running = true
@@ -438,6 +609,9 @@ ShellRoot {
 
             if (!wifiReader.running && !wifiBusy)
                 wifiReader.running = true
+
+            if (!bluetoothReader.running && !bluetoothBusy)
+                bluetoothReader.running = true
         }
 
         Process {
@@ -542,8 +716,12 @@ ShellRoot {
         function toggleWifiMenu() {
             wifiMenuOpen = !wifiMenuOpen
 
-            if (wifiMenuOpen && wifiEnabled)
-                scanWifi()
+            if (wifiMenuOpen) {
+                bluetoothMenuOpen = false
+
+                if (wifiEnabled)
+                    scanWifi()
+            }
         }
 
         function connectWifi(ssid) {
@@ -593,6 +771,63 @@ ShellRoot {
             ])
         }
 
+        function toggleBluetoothMenu() {
+            bluetoothMenuOpen = !bluetoothMenuOpen
+
+            if (bluetoothMenuOpen) {
+                wifiMenuOpen = false
+
+                if (!bluetoothReader.running)
+                    bluetoothReader.running = true
+            }
+        }
+
+        function toggleBluetooth() {
+            if (bluetoothBusy)
+                return
+
+            const nextState = !bluetoothEnabled
+            bluetoothBusy = true
+            bluetoothEnabled = nextState
+            bluetoothError = ""
+            bluetoothMessage = nextState
+                ? "Enabling Bluetooth..."
+                : "Disabling Bluetooth..."
+
+            if (!nextState) {
+                bluetoothConnectedName = ""
+                bluetoothDevices = []
+            }
+
+            bluetoothPowerWriter.exec([
+                "env",
+                "LC_ALL=C",
+                "bluetoothctl",
+                "power",
+                nextState ? "on" : "off"
+            ])
+        }
+
+        function toggleBluetoothDevice(address, connected) {
+            if (bluetoothBusy || address.length === 0)
+                return
+
+            bluetoothBusy = true
+            bluetoothError = ""
+            bluetoothMessage = connected
+                ? "Disconnecting..."
+                : "Connecting..."
+
+            bluetoothDeviceWriter.exec([
+                "env",
+                "LC_ALL=C",
+                "bluetoothctl",
+                connected ? "disconnect" : "connect",
+                address
+            ])
+        }
+
+
         Timer {
             interval: 2500
             running: true
@@ -638,6 +873,8 @@ ShellRoot {
             onActivated: {
                 if (desktop.wifiMenuOpen)
                     desktop.wifiMenuOpen = false
+                else if (desktop.bluetoothMenuOpen)
+                    desktop.bluetoothMenuOpen = false
                 else
                     desktop.viewState = 1
             }
@@ -1397,101 +1634,187 @@ ShellRoot {
                         }
                     }
 
-                    Repeater {
-                        model: [
-                            {
-                                "icon": "bluetooth.svg",
-                                "label": "Bluetooth",
-                                "state": "On",
-                                "enabled": true
-                            },
-                            {
-                                "icon": "moon.svg",
-                                "label": "Do Not Disturb",
-                                "state": "Off",
-                                "enabled": false
-                            }
-                        ]
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
 
-                        delegate: Item {
-                            width: parent.width
-                            height: desktop.p(15)
+                        PremiumIcon {
+                            id: bluetoothRowIcon
 
-                            PremiumIcon {
-                                id: rowIcon
-                                anchors {
-                                    left: parent.left
-                                    verticalCenter: parent.verticalCenter
-                                }
-                                source: Qt.resolvedUrl("icons/" + modelData.icon)
-                                size: desktop.p(12)
-                                iconOpacity: 0.88
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
                             }
 
-                            Text {
-                                anchors {
-                                    left: rowIcon.right
-                                    leftMargin: desktop.p(7)
-                                    verticalCenter: parent.verticalCenter
-                                }
-                                width: desktop.p(72)
-                                text: modelData.label
-                                color: modelData.enabled
-                                    ? desktop.graphite
-                                    : desktop.softInk
-                                font.family: "Inter"
-                                font.pixelSize: desktop.p(7.8)
-                                elide: Text.ElideRight
+                            source: Qt.resolvedUrl("icons/bluetooth.svg")
+                            size: desktop.p(12)
+                            iconOpacity: desktop.bluetoothEnabled ? 0.88 : 0.40
+                        }
+
+                        Text {
+                            anchors {
+                                left: bluetoothRowIcon.right
+                                leftMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
                             }
+
+                            width: desktop.p(62)
+                            text: "Bluetooth"
+                            color: desktop.bluetoothEnabled
+                                ? desktop.graphite
+                                : desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.8)
+                            elide: Text.ElideRight
+                        }
+
+                        Rectangle {
+                            id: bluetoothToggle
+
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(20)
+                            height: desktop.p(11)
+                            radius: height / 2
+                            color: desktop.bluetoothEnabled
+                                ? desktop.softInk
+                                : "#B9B1A8"
+                            opacity: desktop.bluetoothBusy ? 0.58 : 1
 
                             Rectangle {
-                                id: toggle
-                                anchors {
-                                    right: parent.right
-                                    verticalCenter: parent.verticalCenter
-                                }
-                                width: desktop.p(20)
-                                height: desktop.p(11)
-                                radius: height / 2
-                                color: modelData.enabled
-                                    ? desktop.softInk
-                                    : "#B9B1A8"
+                                width: desktop.p(7)
+                                height: desktop.p(7)
+                                radius: width / 2
+                                color: desktop.warmWhite
+                                anchors.verticalCenter: parent.verticalCenter
 
-                                Rectangle {
-                                    width: desktop.p(7)
-                                    height: desktop.p(7)
-                                    radius: width / 2
-                                    color: desktop.warmWhite
+                                x: desktop.bluetoothEnabled
+                                    ? parent.width - width - desktop.p(2)
+                                    : desktop.p(2)
 
-                                    anchors.verticalCenter: parent.verticalCenter
-
-                                    x: modelData.enabled
-                                        ? parent.width - width - desktop.p(2)
-                                        : desktop.p(2)
-
-                                    Behavior on x {
-                                        NumberAnimation {
-                                            duration: 110
-                                            easing.type: Easing.OutCubic
-                                        }
+                                Behavior on x {
+                                    NumberAnimation {
+                                        duration: 110
+                                        easing.type: Easing.OutCubic
                                     }
                                 }
                             }
+                        }
 
-                            Text {
-                                anchors {
-                                    right: toggle.left
-                                    rightMargin: desktop.p(7)
-                                    verticalCenter: parent.verticalCenter
-                                }
-                                width: desktop.p(28)
-                                text: modelData.state
-                                horizontalAlignment: Text.AlignRight
-                                color: desktop.mutedInk
-                                font.family: "Inter"
-                                font.pixelSize: desktop.p(6.9)
-                                elide: Text.ElideRight
+                        Text {
+                            anchors {
+                                right: bluetoothToggle.left
+                                rightMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
                             }
+
+                            width: desktop.p(38)
+                            text: desktop.bluetoothBusy
+                                ? "..."
+                                : (!desktop.bluetoothEnabled
+                                    ? "Off"
+                                    : (desktop.bluetoothConnectedName.length > 0
+                                        ? desktop.bluetoothConnectedName
+                                        : "On"))
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(6.9)
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors {
+                                left: parent.left
+                                top: parent.top
+                                bottom: parent.bottom
+                                right: bluetoothToggle.left
+                                rightMargin: desktop.p(5)
+                            }
+
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: desktop.toggleBluetoothMenu()
+                        }
+
+                        MouseArea {
+                            anchors.fill: bluetoothToggle
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !desktop.bluetoothBusy
+                            onClicked: desktop.toggleBluetooth()
+                        }
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+                        PremiumIcon {
+                            id: dndRowIcon
+
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            source: Qt.resolvedUrl("icons/moon.svg")
+                            size: desktop.p(12)
+                            iconOpacity: 0.88
+                        }
+
+                        Text {
+                            anchors {
+                                left: dndRowIcon.right
+                                leftMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(72)
+                            text: "Do Not Disturb"
+                            color: desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.8)
+                            elide: Text.ElideRight
+                        }
+
+                        Rectangle {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(20)
+                            height: desktop.p(11)
+                            radius: height / 2
+                            color: "#B9B1A8"
+
+                            Rectangle {
+                                width: desktop.p(7)
+                                height: desktop.p(7)
+                                radius: width / 2
+                                color: desktop.warmWhite
+                                anchors.verticalCenter: parent.verticalCenter
+                                x: desktop.p(2)
+                            }
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                rightMargin: desktop.p(27)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(28)
+                            text: "Off"
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(6.9)
                         }
                     }
 
@@ -1719,6 +2042,311 @@ ShellRoot {
                                 border.color: "#AFA69D"
                             }
                         }
+                    }
+                }
+            }
+
+            MouseArea {
+                id: detailMenuDismissLayer
+
+                anchors.fill: parent
+                z: 19
+
+                visible: desktop.wifiMenuOpen
+                    || desktop.bluetoothMenuOpen
+                enabled: visible
+
+                acceptedButtons: Qt.AllButtons
+                cursorShape: Qt.ArrowCursor
+                preventStealing: true
+                propagateComposedEvents: false
+
+                onPressed: function(mouse) {
+                    mouse.accepted = true
+                }
+
+                onClicked: function(mouse) {
+                    desktop.wifiMenuOpen = false
+                    desktop.bluetoothMenuOpen = false
+                    mouse.accepted = true
+                }
+            }
+
+            Rectangle {
+                id: bluetoothMenu
+
+                anchors {
+                    right: settingsPanel.left
+                    rightMargin: desktop.p(9)
+                    bottom: settingsPanel.bottom
+                }
+
+                width: desktop.p(178)
+                height: desktop.p(170)
+                radius: desktop.p(10)
+                z: 21
+
+                color: desktop.panelSurface
+                border.width: Math.max(1, desktop.p(0.65))
+                border.color: desktop.panelBorder
+
+                visible: opacity > 0
+                enabled: desktop.bluetoothMenuOpen
+                opacity: desktop.bluetoothMenuOpen ? 1 : 0
+                scale: desktop.bluetoothMenuOpen ? 1 : 0.985
+
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    z: 1
+                    acceptedButtons: Qt.AllButtons
+                    preventStealing: true
+                    propagateComposedEvents: false
+
+                    onPressed: function(mouse) {
+                        mouse.accepted = true
+                    }
+
+                    onClicked: function(mouse) {
+                        mouse.accepted = true
+                    }
+                }
+
+                Column {
+                    z: 2
+
+                    anchors {
+                        fill: parent
+                        margins: desktop.p(12)
+                    }
+
+                    spacing: desktop.p(7)
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(17)
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: "Bluetooth"
+                            color: desktop.graphite
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(8.7)
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: "Refresh"
+                            color: desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(6.8)
+
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -desktop.p(5)
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !desktop.bluetoothBusy
+                                onClicked: {
+                                    if (!bluetoothReader.running)
+                                        bluetoothReader.running = true
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: Math.max(1, desktop.p(0.65))
+                        color: "#52D8CCBC"
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+                        PremiumIcon {
+                            id: activeBluetoothIcon
+
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            source: Qt.resolvedUrl("icons/bluetooth.svg")
+                            size: desktop.p(11)
+                            iconOpacity: desktop.bluetoothEnabled ? 0.90 : 0.44
+                        }
+
+                        Text {
+                            anchors {
+                                left: activeBluetoothIcon.right
+                                leftMargin: desktop.p(7)
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: !desktop.bluetoothEnabled
+                                ? "Bluetooth is off"
+                                : (desktop.bluetoothConnectedName.length > 0
+                                    ? desktop.bluetoothConnectedName
+                                    : "No device connected")
+                            color: desktop.bluetoothConnectedName.length > 0
+                                ? desktop.graphite
+                                : desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.5)
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: desktop.bluetoothEnabled
+                                ? Qt.ArrowCursor
+                                : Qt.PointingHandCursor
+                            enabled: !desktop.bluetoothEnabled
+                                && !desktop.bluetoothBusy
+                            onClicked: desktop.toggleBluetooth()
+                        }
+                    }
+
+                    ListView {
+                        id: bluetoothDeviceList
+
+                        width: parent.width
+                        height: desktop.p(88)
+                        clip: true
+                        spacing: desktop.p(1)
+                        model: desktop.bluetoothDevices
+                        interactive: contentHeight > height
+                        visible: desktop.bluetoothEnabled
+
+                        delegate: Item {
+                            required property var modelData
+
+                            width: bluetoothDeviceList.width
+                            height: desktop.p(22)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: desktop.p(5)
+                                color: bluetoothDeviceMouse.containsMouse
+                                    ? "#3AD8CCBC"
+                                    : "transparent"
+                            }
+
+                            PremiumIcon {
+                                id: bluetoothDeviceIcon
+
+                                anchors {
+                                    left: parent.left
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                source: Qt.resolvedUrl("icons/bluetooth.svg")
+                                size: desktop.p(10)
+                                iconOpacity: modelData.connected ? 0.95 : 0.68
+                            }
+
+                            Column {
+                                anchors {
+                                    left: bluetoothDeviceIcon.right
+                                    leftMargin: desktop.p(6)
+                                    right: bluetoothDeviceState.left
+                                    rightMargin: desktop.p(7)
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                spacing: desktop.p(0.5)
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.name
+                                    color: modelData.connected
+                                        ? desktop.graphite
+                                        : desktop.softInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(7.2)
+                                    font.weight: modelData.connected
+                                        ? Font.Medium
+                                        : Font.Normal
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.connected
+                                        ? "Connected"
+                                        : "Paired"
+                                    color: desktop.mutedInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(5.8)
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Text {
+                                id: bluetoothDeviceState
+
+                                anchors {
+                                    right: parent.right
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                text: modelData.connected ? "Disconnect" : "Connect"
+                                color: desktop.mutedInk
+                                font.family: "Inter"
+                                font.pixelSize: desktop.p(6.1)
+                            }
+
+                            MouseArea {
+                                id: bluetoothDeviceMouse
+
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !desktop.bluetoothBusy
+                                onClicked: desktop.toggleBluetoothDevice(
+                                    modelData.address,
+                                    modelData.connected
+                                )
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        height: desktop.p(12)
+                        visible: desktop.bluetoothMessage.length > 0
+                        text: desktop.bluetoothMessage
+                        color: desktop.mutedInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(6.2)
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }
