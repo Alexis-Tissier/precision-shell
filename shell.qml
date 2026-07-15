@@ -10,13 +10,13 @@ ShellRoot {
         fullscreen: true
         implicitWidth: 1180
         implicitHeight: 663
-        title: "Precision Shell — Home V6"
+        title: "Precision Shell — Home V8"
         color: "#F6F1E8"
 
         readonly property real designWidth: 1180
         readonly property real designHeight: 663
         readonly property real uiScale: Math.min(width / designWidth, height / designHeight)
-        readonly property real panelScale: uiScale * 1.09
+        readonly property real panelScale: uiScale * 1.16
 
         function s(value) {
             return value * uiScale
@@ -28,6 +28,36 @@ ShellRoot {
 
         property int viewState: 4
         property date now: new Date()
+
+        readonly property var dayNames: [
+            "Sunday", "Monday", "Tuesday", "Wednesday",
+            "Thursday", "Friday", "Saturday"
+        ]
+
+        readonly property var monthNames: [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ]
+
+        function greetingLabel(date) {
+            const hour = date.getHours()
+
+            if (hour < 12)
+                return "Good morning, Alexis."
+
+            if (hour < 18)
+                return "Good afternoon, Alexis."
+
+            return "Good evening, Alexis."
+        }
+
+        function fullDateLabel(date) {
+            return dayNames[date.getDay()]
+                + ", "
+                + date.getDate()
+                + " "
+                + monthNames[date.getMonth()]
+        }
 
         readonly property color ivory: "#F6F1E8"
         readonly property color warmWhite: "#FBF9F5"
@@ -133,7 +163,7 @@ ShellRoot {
                     right: parent.right
                 }
 
-                height: desktop.s(42)
+                height: desktop.s(34)
                 color: "#F8FBF9F5"
 
                 Rectangle {
@@ -158,13 +188,13 @@ ShellRoot {
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/system-mark.svg")
-                        size: desktop.s(14)
+                        size: desktop.s(12.5)
                         iconOpacity: 0.94
                     }
 
                     Item {
                         width: desktop.s(42)
-                        height: desktop.s(26)
+                        height: desktop.s(22)
 
                         Text {
                             anchors {
@@ -176,7 +206,7 @@ ShellRoot {
                             text: "Home"
                             color: desktop.graphite
                             font.family: "Inter"
-                            font.pixelSize: desktop.s(10)
+                            font.pixelSize: desktop.s(9.3)
                             font.weight: Font.Medium
                         }
 
@@ -198,7 +228,7 @@ ShellRoot {
                         text: "Work"
                         color: desktop.mutedInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.s(10)
+                        font.pixelSize: desktop.s(9.3)
                     }
                 }
 
@@ -208,7 +238,7 @@ ShellRoot {
                     text: Qt.formatDateTime(desktop.now, "ddd, MMM d    h:mm AP")
                     color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(9)
+                    font.pixelSize: desktop.s(8.4)
                 }
 
                 Row {
@@ -222,19 +252,19 @@ ShellRoot {
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/volume.svg")
-                        size: desktop.s(13)
+                        size: desktop.s(11.5)
                         iconOpacity: 0.9
                     }
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/wifi.svg")
-                        size: desktop.s(13)
+                        size: desktop.s(11.5)
                         iconOpacity: 0.9
                     }
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/battery.svg")
-                        size: desktop.s(15)
+                        size: desktop.s(13.5)
                         iconOpacity: 0.9
                     }
 
@@ -242,38 +272,30 @@ ShellRoot {
                         text: "100%"
                         color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.s(9)
+                        font.pixelSize: desktop.s(8.4)
                     }
                 }
             }
 
             Column {
                 x: desktop.s(140)
-                y: desktop.s(211)
-                spacing: desktop.s(0)
+                y: desktop.s(226)
+                spacing: desktop.s(7)
 
                 Text {
-                    text: "Focus"
+                    text: desktop.greetingLabel(desktop.now)
                     color: desktop.graphite
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(32)
+                    font.pixelSize: desktop.s(27)
                     font.weight: Font.Light
                 }
 
                 Text {
-                    text: "is a form of precision."
+                    text: desktop.fullDateLabel(desktop.now)
                     color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(30)
-                    font.weight: Font.Light
-                }
-
-                Text {
-                    topPadding: desktop.s(18)
-                    text: "Good evening, Alexis."
-                    color: desktop.mutedInk
-                    font.family: "Inter"
-                    font.pixelSize: desktop.s(9.2)
+                    font.pixelSize: desktop.s(13)
+                    font.weight: Font.Normal
                 }
             }
 
@@ -292,7 +314,7 @@ ShellRoot {
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/brightness.svg")
-                        size: desktop.s(21)
+                        size: desktop.s(23)
                         iconOpacity: 0.92
                     }
 
@@ -300,7 +322,7 @@ ShellRoot {
                         text: "18°"
                         color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.s(20)
+                        font.pixelSize: desktop.s(21.5)
                         font.weight: Font.Light
                     }
                 }
@@ -309,14 +331,14 @@ ShellRoot {
                     text: "Versailles"
                     color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(8.8)
+                    font.pixelSize: desktop.s(9.3)
                 }
 
                 Text {
                     text: "Sunny"
                     color: desktop.mutedInk
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(8.8)
+                    font.pixelSize: desktop.s(9.3)
                 }
 
                 Rectangle {
@@ -330,7 +352,7 @@ ShellRoot {
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/calendar.svg")
-                        size: desktop.s(13)
+                        size: desktop.s(14)
                         iconOpacity: 0.88
                     }
 
@@ -338,7 +360,7 @@ ShellRoot {
                         text: "Design system"
                         color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.s(8.8)
+                        font.pixelSize: desktop.s(9.3)
                     }
                 }
 
@@ -346,7 +368,7 @@ ShellRoot {
                     text: "in 40 min"
                     color: desktop.mutedInk
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(8.8)
+                    font.pixelSize: desktop.s(9.3)
                 }
             }
 
@@ -597,7 +619,7 @@ ShellRoot {
                                 text: modelData.title
                                 color: desktop.graphite
                                 font.family: "Inter"
-                                font.pixelSize: desktop.p(8)
+                                font.pixelSize: desktop.p(8.4)
                             }
 
                             Text {
@@ -605,7 +627,7 @@ ShellRoot {
                                 text: modelData.subtitle
                                 color: desktop.mutedInk
                                 font.family: "Inter"
-                                font.pixelSize: desktop.p(6.5)
+                                font.pixelSize: desktop.p(6.9)
                             }
                         }
                     }
