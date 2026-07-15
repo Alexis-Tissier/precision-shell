@@ -10,13 +10,13 @@ ShellRoot {
         fullscreen: true
         implicitWidth: 1180
         implicitHeight: 663
-        title: "Precision Shell — Home V8"
+        title: "Precision Shell — Home V9"
         color: "#F6F1E8"
 
         readonly property real designWidth: 1180
         readonly property real designHeight: 663
         readonly property real uiScale: Math.min(width / designWidth, height / designHeight)
-        readonly property real panelScale: uiScale * 1.16
+        readonly property real panelScale: uiScale * 1.10
 
         function s(value) {
             return value * uiScale
@@ -65,8 +65,8 @@ ShellRoot {
         readonly property color graphite: "#302D29"
         readonly property color softInk: "#6D675F"
         readonly property color mutedInk: "#948B82"
-        readonly property color panelBorder: "#62CFC4B6"
-        readonly property color panelSurface: "#E7FBF9F5"
+        readonly property color panelBorder: "#4FCFC4B6"
+        readonly property color panelSurface: "#DDFBF9F5"
 
         property var appItems: [
             { "icon": "browser.svg",  "title": "Browse",   "subtitle": "Internet" },
@@ -163,8 +163,8 @@ ShellRoot {
                     right: parent.right
                 }
 
-                height: desktop.s(34)
-                color: "#F8FBF9F5"
+                height: desktop.s(30)
+                color: "#EEFBF9F5"
 
                 Rectangle {
                     anchors {
@@ -174,27 +174,27 @@ ShellRoot {
                     }
 
                     height: Math.max(1, desktop.s(0.7))
-                    color: "#40D8CCBC"
+                    color: "#2FD8CCBC"
                 }
 
                 Row {
                     anchors {
                         left: parent.left
-                        leftMargin: desktop.s(18)
+                        leftMargin: desktop.s(20)
                         verticalCenter: parent.verticalCenter
                     }
 
-                    spacing: desktop.s(22)
+                    spacing: desktop.s(19)
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/system-mark.svg")
-                        size: desktop.s(12.5)
+                        size: desktop.s(10.5)
                         iconOpacity: 0.94
                     }
 
                     Item {
-                        width: desktop.s(42)
-                        height: desktop.s(22)
+                        width: desktop.s(38)
+                        height: desktop.s(20)
 
                         Text {
                             anchors {
@@ -206,20 +206,20 @@ ShellRoot {
                             text: "Home"
                             color: desktop.graphite
                             font.family: "Inter"
-                            font.pixelSize: desktop.s(9.3)
+                            font.pixelSize: desktop.s(8.8)
                             font.weight: Font.Medium
                         }
 
                         Rectangle {
-                            width: desktop.s(2.4)
-                            height: desktop.s(2.4)
-                            radius: desktop.s(1.2)
+                            width: desktop.s(2)
+                            height: desktop.s(2)
+                            radius: desktop.s(1)
                             color: desktop.softInk
 
                             anchors {
                                 horizontalCenter: parent.horizontalCenter
                                 bottom: parent.bottom
-                                bottomMargin: desktop.s(1)
+                                bottomMargin: desktop.s(0.5)
                             }
                         }
                     }
@@ -228,7 +228,7 @@ ShellRoot {
                         text: "Work"
                         color: desktop.mutedInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.s(9.3)
+                        font.pixelSize: desktop.s(8.8)
                     }
                 }
 
@@ -238,21 +238,21 @@ ShellRoot {
                     text: Qt.formatDateTime(desktop.now, "ddd, MMM d    h:mm AP")
                     color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: desktop.s(8.4)
+                    font.pixelSize: desktop.s(8)
                 }
 
                 Row {
                     anchors {
                         right: parent.right
-                        rightMargin: desktop.s(16)
+                        rightMargin: desktop.s(18)
                         verticalCenter: parent.verticalCenter
                     }
 
-                    spacing: desktop.s(12)
+                    spacing: desktop.s(10)
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/volume.svg")
-                        size: desktop.s(11.5)
+                        size: desktop.s(10.5)
                         iconOpacity: 0.9
                     }
 
@@ -264,7 +264,7 @@ ShellRoot {
 
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/battery.svg")
-                        size: desktop.s(13.5)
+                        size: desktop.s(12.5)
                         iconOpacity: 0.9
                     }
 
@@ -272,7 +272,7 @@ ShellRoot {
                         text: "100%"
                         color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.s(8.4)
+                        font.pixelSize: desktop.s(8)
                     }
                 }
             }
@@ -381,11 +381,11 @@ ShellRoot {
                     left: parent.left
                     leftMargin: desktop.p(26)
                     bottom: parent.bottom
-                    bottomMargin: desktop.p(28)
+                    bottomMargin: desktop.p(29)
                 }
 
-                width: desktop.p(152)
-                height: desktop.p(174)
+                width: desktop.p(146)
+                height: desktop.p(160)
                 radius: desktop.p(10)
 
                 color: desktop.panelSurface
@@ -416,7 +416,7 @@ ShellRoot {
                         margins: desktop.p(15)
                     }
 
-                    spacing: desktop.p(13)
+                    spacing: desktop.p(11)
 
                     Text {
                         text: "Apps"
@@ -449,7 +449,7 @@ ShellRoot {
 
                     Item {
                         width: 1
-                        height: desktop.p(9)
+                        height: desktop.p(4)
                     }
 
                     Rectangle {
@@ -486,12 +486,12 @@ ShellRoot {
                 anchors {
                     horizontalCenter: parent.horizontalCenter
                     bottom: parent.bottom
-                    bottomMargin: desktop.p(93)
+                    bottomMargin: desktop.p(97)
                 }
 
-                width: desktop.p(586)
-                height: desktop.p(130)
-                radius: desktop.p(11)
+                width: desktop.p(552)
+                height: desktop.p(123)
+                radius: desktop.p(10)
 
                 color: desktop.panelSurface
                 border.width: Math.max(1, desktop.p(0.7))
@@ -641,13 +641,13 @@ ShellRoot {
 
                 anchors {
                     right: parent.right
-                    rightMargin: desktop.p(24)
+                    rightMargin: desktop.p(26)
                     bottom: parent.bottom
-                    bottomMargin: desktop.p(28)
+                    bottomMargin: desktop.p(29)
                 }
 
-                width: desktop.p(166)
-                height: desktop.p(174)
+                width: desktop.p(160)
+                height: desktop.p(168)
                 radius: desktop.p(10)
 
                 color: desktop.panelSurface
