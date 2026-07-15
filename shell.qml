@@ -10,7 +10,7 @@ ShellRoot {
         fullscreen: true
         implicitWidth: 1180
         implicitHeight: 663
-        title: "Precision Shell — Home V9"
+        title: "Precision Shell — Home V14"
         color: "#F6F1E8"
 
         readonly property real designWidth: 1180
@@ -28,6 +28,7 @@ ShellRoot {
 
         property int viewState: 4
         property date now: new Date()
+        property bool restoreWidgetsOnFocus: false
 
         readonly property var dayNames: [
             "Sunday", "Monday", "Tuesday", "Wednesday",
@@ -69,13 +70,82 @@ ShellRoot {
         readonly property color panelSurface: "#DDFBF9F5"
 
         property var appItems: [
-            { "icon": "browser.svg",  "title": "Browse",   "subtitle": "Internet" },
-            { "icon": "terminal.svg", "title": "Terminal", "subtitle": "System" },
-            { "icon": "files.svg",    "title": "Files",    "subtitle": "Documents" },
-            { "icon": "notes.svg",    "title": "Notes",    "subtitle": "Quick capture" },
-            { "icon": "calendar.svg", "title": "Calendar", "subtitle": "Schedule" },
-            { "icon": "mail.svg",     "title": "Mail",     "subtitle": "Inbox" }
+            {
+                "icon": "browser.svg",
+                "title": "Browse",
+                "subtitle": "Internet",
+                "lookup": "Brave",
+                "fallback": ["brave-browser"]
+            },
+            {
+                "icon": "terminal.svg",
+                "title": "Terminal",
+                "subtitle": "System",
+                "lookup": "Alacritty",
+                "fallback": ["alacritty"]
+            },
+            {
+                "icon": "files.svg",
+                "title": "Files",
+                "subtitle": "Documents",
+                "lookup": "Files",
+                "fallback": ["nautilus"]
+            },
+            {
+                "icon": "notes.svg",
+                "title": "Notes",
+                "subtitle": "Quick capture",
+                "lookup": "Text Editor",
+                "fallback": ["gnome-text-editor"]
+            },
+            {
+                "icon": "calendar.svg",
+                "title": "Calendar",
+                "subtitle": "Schedule",
+                "lookup": "Calendar",
+                "fallback": ["gnome-calendar"]
+            },
+            {
+                "icon": "mail.svg",
+                "title": "Mail",
+                "subtitle": "Inbox",
+                "lookup": "Thunderbird",
+                "fallback": ["thunderbird"]
+            }
         ]
+
+        function filteredAppItems() {
+            const query = searchInput.text.trim().toLowerCase()
+
+            if (query.length === 0)
+                return appItems
+
+            return appItems.filter(function(item) {
+                return item.title.toLowerCase().indexOf(query) !== -1
+                    || item.subtitle.toLowerCase().indexOf(query) !== -1
+                    || item.lookup.toLowerCase().indexOf(query) !== -1
+            })
+        }
+
+        function launchApplication(item) {
+            const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
+
+            if (desktopEntry !== null) {
+                desktopEntry.execute()
+            } else {
+                Quickshell.execDetached({
+                    command: item.fallback
+                })
+            }
+
+            searchInput.text = ""
+            searchInput.focus = false
+
+            // Keep the shell itself visible behind the launched application,
+            // but hide only the three transient widgets.
+            restoreWidgetsOnFocus = true
+            viewState = 1
+        }
 
         Timer {
             interval: 30000
@@ -132,6 +202,19 @@ ShellRoot {
             onActivated: Qt.quit()
         }
 
+
+        Connections {
+            target: Qt.application
+
+            function onActiveChanged() {
+                if (Qt.application.active && desktop.restoreWidgetsOnFocus) {
+                    desktop.restoreWidgetsOnFocus = false
+                    searchInput.text = ""
+                    searchInput.focus = false
+                    desktop.viewState = 4
+                }
+            }
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -563,6 +646,20 @@ ShellRoot {
                         bottomPadding: 0
                         verticalAlignment: TextInput.AlignVCenter
                         background: Item {}
+
+                        Keys.onReturnPressed: {
+                            const matches = desktop.filteredAppItems()
+
+                            if (matches.length > 0)
+                                desktop.launchApplication(matches[0])
+                        }
+
+                        Keys.onEnterPressed: {
+                            const matches = desktop.filteredAppItems()
+
+                            if (matches.length > 0)
+                                desktop.launchApplication(matches[0])
+                        }
                     }
 
                     Text {
@@ -591,6 +688,20 @@ ShellRoot {
                     color: "#55D8CCBC"
                 }
 
+                Text {
+                    anchors {
+                        horizontalCenter: parent.horizontalCenter
+                        verticalCenter: parent.verticalCenter
+                        verticalCenterOffset: desktop.p(23)
+                    }
+
+                    visible: desktop.filteredAppItems().length === 0
+                    text: "No matching application"
+                    color: desktop.mutedInk
+                    font.family: "Inter"
+                    font.pixelSize: desktop.p(8)
+                }
+
                 Row {
                     anchors {
                         horizontalCenter: parent.horizontalCenter
@@ -601,33 +712,71 @@ ShellRoot {
                     spacing: desktop.p(26)
 
                     Repeater {
-                        model: desktop.appItems
+                        model: desktop.filteredAppItems()
 
-                        delegate: Column {
+                        delegate: Item {
+                            id: appTile
+
                             width: desktop.p(64)
-                            spacing: desktop.p(3)
+                            height: desktop.p(56)
 
-                            PremiumIcon {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                source: Qt.resolvedUrl("icons/" + modelData.icon)
-                                size: desktop.p(20)
-                                iconOpacity: 0.94
+                            Rectangle {
+                                anchors {
+                                    horizontalCenter: parent.horizontalCenter
+                                    bottom: parent.bottom
+                                    bottomMargin: desktop.p(1)
+                                }
+
+                                width: desktop.p(22)
+                                height: Math.max(1, desktop.p(0.7))
+                                radius: height / 2
+                                color: desktop.softInk
+                                opacity: tileMouse.containsMouse ? 0.48 : 0
+
+                                Behavior on opacity {
+                                    NumberAnimation {
+                                        duration: 85
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
                             }
 
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData.title
-                                color: desktop.graphite
-                                font.family: "Inter"
-                                font.pixelSize: desktop.p(8.4)
+                            Column {
+                                anchors.centerIn: parent
+                                spacing: desktop.p(3)
+
+                                PremiumIcon {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    source: Qt.resolvedUrl("icons/" + modelData.icon)
+                                    size: desktop.p(20)
+                                    iconOpacity: tileMouse.containsMouse ? 1.0 : 0.88
+                                }
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.title
+                                    color: tileMouse.containsMouse ? desktop.graphite : desktop.softInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(8.4)
+                                    font.weight: Font.Normal
+                                }
+
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: modelData.subtitle
+                                    color: desktop.mutedInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(6.9)
+                                }
                             }
 
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData.subtitle
-                                color: desktop.mutedInk
-                                font.family: "Inter"
-                                font.pixelSize: desktop.p(6.9)
+                            MouseArea {
+                                id: tileMouse
+
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: desktop.launchApplication(modelData)
                             }
                         }
                     }
