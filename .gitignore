@@ -1,0 +1,12 @@
+# Outils QML locaux
+.qmlls.ini
+*.log
+
+# Fonds photographiques non distribués
+assets/wallpaper.jpg
+assets/wallpaper.jpeg
+assets/wallpaper.png
+
+# Fichiers temporaires
+.DS_Store
+*~
