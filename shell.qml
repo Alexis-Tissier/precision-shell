@@ -1,4 +1,5 @@
 import Quickshell
+import Quickshell.Io
 import QtQuick
 import QtQuick.Controls
 
@@ -10,7 +11,7 @@ ShellRoot {
         fullscreen: true
         implicitWidth: 1180
         implicitHeight: 663
-        title: "Precision Shell — Home V14"
+        title: "Precision Shell — Home V23"
         color: "#F6F1E8"
 
         readonly property real designWidth: 1180
@@ -29,6 +30,27 @@ ShellRoot {
         property int viewState: 4
         property date now: new Date()
         property bool restoreWidgetsOnFocus: false
+
+        property int batteryPercent: 100
+        property real volumeLevel: 0.0
+        property real brightnessLevel: 0.54
+        property real pendingVolumeLevel: 0.0
+        property real pendingBrightnessLevel: 0.54
+        property int brightnessWritePercent: 54
+        property int brightnessAppliedPercent: -1
+        property bool brightnessWriteQueued: false
+        readonly property string brightnessDevice: "intel_backlight"
+
+        property bool wifiEnabled: true
+        property bool wifiConnected: false
+        property bool wifiBusy: false
+        property bool wifiMenuOpen: false
+        property bool wifiScanning: false
+        property bool wifiTargetEnabled: false
+        property string wifiSsid: ""
+        property string wifiMessage: ""
+        property string wifiWriterError: ""
+        property var wifiNetworks: []
 
         readonly property var dayNames: [
             "Sunday", "Monday", "Tuesday", "Wednesday",
@@ -144,6 +166,7 @@ ShellRoot {
             // Keep the shell itself visible behind the launched application,
             // but hide only the three transient widgets.
             restoreWidgetsOnFocus = true
+            wifiMenuOpen = false
             viewState = 1
         }
 
@@ -153,6 +176,419 @@ ShellRoot {
             repeat: true
             onTriggered: desktop.now = new Date()
         }
+
+        Process {
+            id: batteryReader
+            command: [
+                "bash",
+                "-lc",
+                "device=$(upower -e | grep '/battery_' | head -n1); "
+                + "test -n \"$device\" && upower -i \"$device\" "
+                + "| awk '/percentage:/ {gsub(\"%\", \"\", $2); print $2; exit}'"
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const parsed = parseInt(text.trim())
+
+                    if (!isNaN(parsed))
+                        desktop.batteryPercent = Math.max(0, Math.min(100, parsed))
+                }
+            }
+        }
+
+        Process {
+            id: volumeReader
+            command: [
+                "bash",
+                "-lc",
+                "wpctl get-volume @DEFAULT_AUDIO_SINK@ "
+                + "| awk '{printf \"%.0f\\n\", $2 * 100}'"
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const parsed = parseInt(text.trim())
+
+                    if (!isNaN(parsed) && !volumeSlider.pressed)
+                        desktop.volumeLevel = Math.max(0, Math.min(1, parsed / 100))
+                }
+            }
+        }
+
+        Process {
+            id: brightnessReader
+            command: [
+                "bash",
+                "-lc",
+                "brightnessctl -m | awk -F, '{gsub(\"%\", \"\", $4); print $4}'"
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const parsed = parseInt(text.trim())
+
+                    if (!isNaN(parsed) && !brightnessSlider.pressed)
+                        desktop.brightnessLevel = Math.max(0.01, Math.min(1, parsed / 100))
+                }
+            }
+        }
+
+        Process {
+            id: wifiReader
+            command: [
+                "bash",
+                "-lc",
+                "export LC_ALL=C; "
+                + "radio=$(nmcli radio wifi 2>/dev/null); "
+                + "device=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null "
+                + "| awk -F: '$2 == \"wifi\" {print $1; exit}'); "
+                + "ssid=\"\"; "
+                + "if [ -n \"$device\" ]; then "
+                + "ssid=$(nmcli -g GENERAL.CONNECTION device show \"$device\" "
+                + "2>/dev/null | head -n1); "
+                + "fi; "
+                + "[ \"$ssid\" = \"--\" ] && ssid=\"\"; "
+                + "printf '%s\\n%s\\n' \"$radio\" \"$ssid\""
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const lines = text.trim().split("\\n")
+                    const radioState = lines.length > 0 ? lines[0].trim() : ""
+                    const connectionName = lines.length > 1 ? lines[1].trim() : ""
+
+                    desktop.wifiEnabled = radioState === "enabled"
+                    desktop.wifiSsid = connectionName
+                    desktop.wifiConnected = desktop.wifiEnabled
+                        && connectionName.length > 0
+                }
+            }
+        }
+
+        Process {
+            id: wifiWriter
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    desktop.wifiWriterError = text.trim()
+
+                    if (desktop.wifiWriterError.length > 0)
+                        console.warn("Wi-Fi control:", desktop.wifiWriterError)
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                if (exitCode !== 0) {
+                    desktop.wifiMessage = desktop.wifiWriterError.length > 0
+                        ? desktop.wifiWriterError
+                        : "Unable to change Wi-Fi state"
+                } else {
+                    desktop.wifiMessage = desktop.wifiTargetEnabled
+                        ? "Wi-Fi enabled"
+                        : "Wi-Fi disabled"
+                }
+
+                desktop.wifiBusy = false
+                wifiRefreshTimer.restart()
+            }
+        }
+
+        Process {
+            id: wifiScanner
+            command: [
+                "bash",
+                "-lc",
+                "export LC_ALL=C; "
+                + "nmcli -t --escape no "
+                + "-f IN-USE,SSID,SIGNAL,SECURITY "
+                + "device wifi list --rescan yes 2>/dev/null"
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const raw = text.trim()
+                    const entries = raw.length > 0 ? raw.split("\n") : []
+                    const strongest = {}
+
+                    for (let index = 0; index < entries.length; index++) {
+                        const parts = entries[index].split(":")
+
+                        if (parts.length < 4)
+                            continue
+
+                        const inUse = parts.shift().trim()
+                        const security = parts.pop().trim()
+                        const parsedSignal = parseInt(parts.pop())
+                        const ssid = parts.join(":").trim()
+
+                        if (ssid.length === 0)
+                            continue
+
+                        const signal = isNaN(parsedSignal) ? 0 : parsedSignal
+                        const candidate = {
+                            "ssid": ssid,
+                            "signal": signal,
+                            "security": security,
+                            "connected": inUse === "*"
+                        }
+
+                        if (strongest[ssid] === undefined
+                                || signal > strongest[ssid].signal) {
+                            strongest[ssid] = candidate
+                        }
+                    }
+
+                    const networks = []
+
+                    for (const ssid in strongest)
+                        networks.push(strongest[ssid])
+
+                    networks.sort(function(left, right) {
+                        if (left.connected !== right.connected)
+                            return left.connected ? -1 : 1
+
+                        return right.signal - left.signal
+                    })
+
+                    desktop.wifiNetworks = networks.slice(0, 6)
+                    desktop.wifiScanning = false
+
+                    if (desktop.wifiNetworks.length === 0
+                            && desktop.wifiEnabled) {
+                        desktop.wifiMessage = "No network found"
+                    } else if (desktop.wifiMessage === "Scanning...") {
+                        desktop.wifiMessage = ""
+                    }
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                desktop.wifiScanning = false
+
+                if (exitCode !== 0)
+                    desktop.wifiMessage = "Scan unavailable"
+            }
+        }
+
+        Process {
+            id: wifiConnector
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    const message = text.trim()
+
+                    if (message.length > 0)
+                        console.log("Wi-Fi connection:", message)
+                }
+            }
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    const message = text.trim()
+
+                    if (message.length > 0)
+                        console.warn("Wi-Fi connection:", message)
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                desktop.wifiBusy = false
+                desktop.wifiMessage = exitCode === 0
+                    ? "Connected"
+                    : "Password required or connection failed"
+                wifiRefreshTimer.restart()
+            }
+        }
+
+        Timer {
+            id: wifiRefreshTimer
+            interval: 900
+            repeat: false
+
+            onTriggered: {
+                if (!wifiReader.running)
+                    wifiReader.running = true
+
+                if (desktop.wifiMenuOpen && desktop.wifiEnabled)
+                    desktop.scanWifi()
+            }
+        }
+
+        function refreshSystemState() {
+            if (!batteryReader.running)
+                batteryReader.running = true
+
+            if (!volumeReader.running)
+                volumeReader.running = true
+
+            if (!brightnessReader.running)
+                brightnessReader.running = true
+
+            if (!wifiReader.running && !wifiBusy)
+                wifiReader.running = true
+        }
+
+        Process {
+            id: volumeWriter
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    const message = text.trim()
+
+                    if (message.length > 0)
+                        console.warn("Volume control:", message)
+                }
+            }
+        }
+
+        Process {
+            id: brightnessWriter
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    const message = text.trim()
+
+                    if (message.length > 0)
+                        console.warn("Brightness control:", message)
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                if (exitCode !== 0)
+                    console.warn("brightnessctl exited with code", exitCode)
+
+                desktop.flushBrightnessWrite()
+            }
+        }
+
+        Timer {
+            id: volumeWriteTimer
+            interval: 45
+            repeat: false
+
+            onTriggered: {
+                volumeWriter.exec([
+                    "wpctl",
+                    "set-volume",
+                    "@DEFAULT_AUDIO_SINK@",
+                    Math.round(desktop.pendingVolumeLevel * 100) + "%"
+                ])
+            }
+        }
+
+        function queueVolume(level) {
+            const normalized = Math.max(0, Math.min(1, level))
+            volumeLevel = normalized
+            pendingVolumeLevel = normalized
+            volumeWriteTimer.restart()
+        }
+
+        function flushBrightnessWrite() {
+            if (brightnessWriter.running || !brightnessWriteQueued)
+                return
+
+            brightnessWriteQueued = false
+            brightnessAppliedPercent = brightnessWritePercent
+
+            brightnessWriter.exec([
+                "brightnessctl",
+                "-q",
+                "-d",
+                brightnessDevice,
+                "set",
+                brightnessAppliedPercent + "%"
+            ])
+        }
+
+        function queueBrightness(level) {
+            const normalized = Math.max(0.01, Math.min(1, level))
+            const percent = Math.round(normalized * 100)
+
+            brightnessLevel = normalized
+            pendingBrightnessLevel = normalized
+            brightnessWritePercent = percent
+
+            if (percent === brightnessAppliedPercent
+                    && !brightnessWriter.running) {
+                brightnessWriteQueued = false
+                return
+            }
+
+            brightnessWriteQueued = true
+            flushBrightnessWrite()
+        }
+
+        function scanWifi() {
+            if (!wifiEnabled || wifiScanner.running)
+                return
+
+            wifiScanning = true
+            wifiMessage = "Scanning..."
+            wifiScanner.running = true
+        }
+
+        function toggleWifiMenu() {
+            wifiMenuOpen = !wifiMenuOpen
+
+            if (wifiMenuOpen && wifiEnabled)
+                scanWifi()
+        }
+
+        function connectWifi(ssid) {
+            if (wifiBusy || ssid.length === 0)
+                return
+
+            if (wifiConnected && ssid === wifiSsid) {
+                wifiMessage = "Already connected"
+                return
+            }
+
+            wifiBusy = true
+            wifiMessage = "Connecting to " + ssid + "..."
+
+            wifiConnector.exec([
+                "nmcli",
+                "--wait",
+                "15",
+                "device",
+                "wifi",
+                "connect",
+                ssid
+            ])
+        }
+
+        function toggleWifi() {
+            if (wifiBusy)
+                return
+
+            wifiTargetEnabled = !wifiEnabled
+            wifiBusy = true
+            wifiWriterError = ""
+            wifiMessage = wifiTargetEnabled
+                ? "Enabling Wi-Fi..."
+                : "Disabling Wi-Fi..."
+
+            wifiWriter.exec([
+                "env",
+                "LC_ALL=C",
+                "nmcli",
+                "--wait",
+                "5",
+                "radio",
+                "wifi",
+                wifiTargetEnabled ? "on" : "off"
+            ])
+        }
+
+        Timer {
+            interval: 2500
+            running: true
+            repeat: true
+            triggeredOnStart: true
+            onTriggered: desktop.refreshSystemState()
+        }
+
 
         Shortcut {
             context: Qt.ApplicationShortcut
@@ -187,7 +623,12 @@ ShellRoot {
         Shortcut {
             context: Qt.ApplicationShortcut
             sequence: "Escape"
-            onActivated: desktop.viewState = 1
+            onActivated: {
+                if (desktop.wifiMenuOpen)
+                    desktop.wifiMenuOpen = false
+                else
+                    desktop.viewState = 1
+            }
         }
 
         Shortcut {
@@ -342,7 +783,7 @@ ShellRoot {
                     PremiumIcon {
                         source: Qt.resolvedUrl("icons/wifi.svg")
                         size: desktop.s(11.5)
-                        iconOpacity: 0.9
+                        iconOpacity: desktop.wifiEnabled ? 0.9 : 0.32
                     }
 
                     PremiumIcon {
@@ -352,7 +793,7 @@ ShellRoot {
                     }
 
                     Text {
-                        text: "100%"
+                        text: desktop.batteryPercent + "%"
                         color: desktop.softInk
                         font.family: "Inter"
                         font.pixelSize: desktop.s(8)
@@ -829,14 +1270,123 @@ ShellRoot {
 
                     spacing: desktop.p(7)
 
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+                        PremiumIcon {
+                            id: wifiRowIcon
+
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            source: Qt.resolvedUrl("icons/wifi.svg")
+                            size: desktop.p(12)
+                            iconOpacity: desktop.wifiEnabled ? 0.88 : 0.40
+                        }
+
+                        Text {
+                            anchors {
+                                left: wifiRowIcon.right
+                                leftMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(42)
+                            text: "Wi-Fi"
+                            color: desktop.wifiEnabled
+                                ? desktop.graphite
+                                : desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.8)
+                        }
+
+                        Rectangle {
+                            id: wifiToggle
+
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(20)
+                            height: desktop.p(11)
+                            radius: height / 2
+                            color: desktop.wifiEnabled
+                                ? desktop.softInk
+                                : "#B9B1A8"
+                            opacity: desktop.wifiBusy ? 0.58 : 1
+
+                            Rectangle {
+                                width: desktop.p(7)
+                                height: desktop.p(7)
+                                radius: width / 2
+                                color: desktop.warmWhite
+
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                x: desktop.wifiEnabled
+                                    ? parent.width - width - desktop.p(2)
+                                    : desktop.p(2)
+
+                                Behavior on x {
+                                    NumberAnimation {
+                                        duration: 110
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors {
+                                right: wifiToggle.left
+                                rightMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(38)
+                            text: desktop.wifiBusy
+                                ? "..."
+                                : (!desktop.wifiEnabled
+                                    ? "Off"
+                                    : (desktop.wifiConnected
+                                        ? desktop.wifiSsid
+                                        : "On"))
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(6.9)
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors {
+                                left: parent.left
+                                top: parent.top
+                                bottom: parent.bottom
+                                right: wifiToggle.left
+                                rightMargin: desktop.p(5)
+                            }
+
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: desktop.toggleWifiMenu()
+                        }
+
+                        MouseArea {
+                            anchors.fill: wifiToggle
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: !desktop.wifiBusy
+                            onClicked: desktop.toggleWifi()
+                        }
+                    }
+
                     Repeater {
                         model: [
-                            {
-                                "icon": "wifi.svg",
-                                "label": "Wi-Fi",
-                                "state": "Studio",
-                                "enabled": true
-                            },
                             {
                                 "icon": "bluetooth.svg",
                                 "label": "Bluetooth",
@@ -874,7 +1424,9 @@ ShellRoot {
                                 }
                                 width: desktop.p(72)
                                 text: modelData.label
-                                color: modelData.enabled ? desktop.graphite : desktop.softInk
+                                color: modelData.enabled
+                                    ? desktop.graphite
+                                    : desktop.softInk
                                 font.family: "Inter"
                                 font.pixelSize: desktop.p(7.8)
                                 elide: Text.ElideRight
@@ -889,19 +1441,27 @@ ShellRoot {
                                 width: desktop.p(20)
                                 height: desktop.p(11)
                                 radius: height / 2
-                                color: modelData.enabled ? desktop.softInk : "#B9B1A8"
+                                color: modelData.enabled
+                                    ? desktop.softInk
+                                    : "#B9B1A8"
 
                                 Rectangle {
                                     width: desktop.p(7)
                                     height: desktop.p(7)
                                     radius: width / 2
                                     color: desktop.warmWhite
-                                    anchors {
-                                        verticalCenter: parent.verticalCenter
-                                        right: modelData.enabled ? parent.right : undefined
-                                        left: modelData.enabled ? undefined : parent.left
-                                        rightMargin: modelData.enabled ? desktop.p(2) : 0
-                                        leftMargin: modelData.enabled ? 0 : desktop.p(2)
+
+                                    anchors.verticalCenter: parent.verticalCenter
+
+                                    x: modelData.enabled
+                                        ? parent.width - width - desktop.p(2)
+                                        : desktop.p(2)
+
+                                    Behavior on x {
+                                        NumberAnimation {
+                                            duration: 110
+                                            easing.type: Easing.OutCubic
+                                        }
                                     }
                                 }
                             }
@@ -993,30 +1553,63 @@ ShellRoot {
                             iconOpacity: 0.74
                         }
 
-                        Rectangle {
+                        Slider {
+                            id: volumeSlider
+
                             anchors {
                                 left: volumeLeft.right
                                 leftMargin: desktop.p(7)
                                 right: volumeRight.left
                                 rightMargin: desktop.p(7)
-                                verticalCenter: parent.verticalCenter
-                            }
-                            height: desktop.p(1.6)
-                            radius: height / 2
-                            color: "#CBC1B5"
-
-                            Rectangle {
-                                width: parent.width * 0.56
-                                height: parent.height
-                                radius: parent.radius
-                                color: desktop.softInk
+                                top: parent.top
+                                bottom: parent.bottom
                             }
 
-                            Rectangle {
-                                x: parent.width * 0.56 - width / 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: desktop.p(7)
-                                height: desktop.p(7)
+                            implicitHeight: desktop.p(16)
+                            z: 2
+                            hoverEnabled: true
+
+                            from: 0
+                            to: 1
+                            value: desktop.volumeLevel
+                            padding: 0
+
+                            live: true
+
+                            onMoved: desktop.queueVolume(value)
+
+                            onPressedChanged: {
+                                if (!pressed)
+                                    desktop.queueVolume(value)
+                            }
+
+                            background: Rectangle {
+                                x: volumeSlider.leftPadding
+                                y: volumeSlider.topPadding
+                                    + volumeSlider.availableHeight / 2
+                                    - height / 2
+                                width: volumeSlider.availableWidth
+                                height: desktop.p(1.6)
+                                radius: height / 2
+                                color: "#CBC1B5"
+
+                                Rectangle {
+                                    width: volumeSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: parent.radius
+                                    color: desktop.softInk
+                                }
+                            }
+
+                            handle: Rectangle {
+                                x: volumeSlider.leftPadding
+                                    + volumeSlider.visualPosition
+                                    * (volumeSlider.availableWidth - width)
+                                y: volumeSlider.topPadding
+                                    + volumeSlider.availableHeight / 2
+                                    - height / 2
+                                width: desktop.p(8)
+                                height: desktop.p(8)
                                 radius: width / 2
                                 color: desktop.warmWhite
                                 border.width: Math.max(1, desktop.p(0.6))
@@ -1051,36 +1644,348 @@ ShellRoot {
                             iconOpacity: 0.74
                         }
 
-                        Rectangle {
+                        Slider {
+                            id: brightnessSlider
+
                             anchors {
                                 left: brightnessLeft.right
                                 leftMargin: desktop.p(7)
                                 right: brightnessRight.left
                                 rightMargin: desktop.p(7)
-                                verticalCenter: parent.verticalCenter
-                            }
-                            height: desktop.p(1.6)
-                            radius: height / 2
-                            color: "#CBC1B5"
-
-                            Rectangle {
-                                width: parent.width * 0.34
-                                height: parent.height
-                                radius: parent.radius
-                                color: desktop.softInk
+                                top: parent.top
+                                bottom: parent.bottom
                             }
 
-                            Rectangle {
-                                x: parent.width * 0.34 - width / 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: desktop.p(7)
-                                height: desktop.p(7)
+                            implicitHeight: desktop.p(16)
+                            z: 2
+                            hoverEnabled: true
+
+                            from: 0.01
+                            to: 1
+                            value: desktop.brightnessLevel
+                            padding: 0
+
+                            live: true
+
+                            onMoved: desktop.queueBrightness(value)
+
+                            onPressedChanged: {
+                                if (!pressed)
+                                    desktop.queueBrightness(value)
+                            }
+
+                            background: Rectangle {
+                                x: brightnessSlider.leftPadding
+                                y: brightnessSlider.topPadding
+                                    + brightnessSlider.availableHeight / 2
+                                    - height / 2
+                                width: brightnessSlider.availableWidth
+                                height: desktop.p(1.6)
+                                radius: height / 2
+                                color: "#CBC1B5"
+
+                                Rectangle {
+                                    width: brightnessSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: parent.radius
+                                    color: desktop.softInk
+                                }
+                            }
+
+                            handle: Rectangle {
+                                x: brightnessSlider.leftPadding
+                                    + brightnessSlider.visualPosition
+                                    * (brightnessSlider.availableWidth - width)
+                                y: brightnessSlider.topPadding
+                                    + brightnessSlider.availableHeight / 2
+                                    - height / 2
+                                width: desktop.p(8)
+                                height: desktop.p(8)
                                 radius: width / 2
                                 color: desktop.warmWhite
                                 border.width: Math.max(1, desktop.p(0.6))
                                 border.color: "#AFA69D"
                             }
                         }
+                    }
+                }
+            }
+
+            Rectangle {
+                id: wifiMenu
+
+                anchors {
+                    right: settingsPanel.left
+                    rightMargin: desktop.p(9)
+                    bottom: settingsPanel.bottom
+                }
+
+                width: desktop.p(178)
+                height: desktop.p(170)
+                radius: desktop.p(10)
+                z: 20
+
+                color: desktop.panelSurface
+                border.width: Math.max(1, desktop.p(0.65))
+                border.color: desktop.panelBorder
+
+                visible: opacity > 0
+                enabled: desktop.wifiMenuOpen
+                opacity: desktop.wifiMenuOpen ? 1 : 0
+                scale: desktop.wifiMenuOpen ? 1 : 0.985
+
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    z: 1
+                    acceptedButtons: Qt.AllButtons
+                    preventStealing: true
+                    propagateComposedEvents: false
+
+                    onPressed: function(mouse) {
+                        mouse.accepted = true
+                    }
+
+                    onClicked: function(mouse) {
+                        mouse.accepted = true
+                    }
+                }
+
+                Column {
+                    z: 2
+
+                    anchors {
+                        fill: parent
+                        margins: desktop.p(12)
+                    }
+
+                    spacing: desktop.p(7)
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(17)
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: "Wi-Fi"
+                            color: desktop.graphite
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(8.7)
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: desktop.wifiScanning ? "Scanning..." : "Refresh"
+                            color: desktop.wifiScanning
+                                ? desktop.mutedInk
+                                : desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(6.8)
+
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -desktop.p(5)
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: desktop.wifiEnabled
+                                    && !desktop.wifiScanning
+                                onClicked: desktop.scanWifi()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: Math.max(1, desktop.p(0.65))
+                        color: "#52D8CCBC"
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+                        PremiumIcon {
+                            id: activeWifiIcon
+
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            source: Qt.resolvedUrl("icons/wifi.svg")
+                            size: desktop.p(11)
+                            iconOpacity: desktop.wifiConnected ? 0.90 : 0.44
+                        }
+
+                        Text {
+                            anchors {
+                                left: activeWifiIcon.right
+                                leftMargin: desktop.p(7)
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: !desktop.wifiEnabled
+                                ? "Wi-Fi is off"
+                                : (desktop.wifiConnected
+                                    ? desktop.wifiSsid
+                                    : "Not connected")
+                            color: desktop.wifiConnected
+                                ? desktop.graphite
+                                : desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.5)
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: desktop.wifiEnabled
+                                ? Qt.ArrowCursor
+                                : Qt.PointingHandCursor
+                            enabled: !desktop.wifiEnabled
+                                && !desktop.wifiBusy
+                            onClicked: desktop.toggleWifi()
+                        }
+                    }
+
+                    ListView {
+                        id: wifiNetworkList
+
+                        width: parent.width
+                        height: desktop.p(88)
+                        clip: true
+                        spacing: desktop.p(1)
+                        model: desktop.wifiNetworks
+                        interactive: contentHeight > height
+                        visible: desktop.wifiEnabled
+
+                        delegate: Item {
+                            required property var modelData
+
+                            width: wifiNetworkList.width
+                            height: desktop.p(20)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: desktop.p(5)
+                                color: networkMouse.containsMouse
+                                    ? "#3AD8CCBC"
+                                    : "transparent"
+                            }
+
+                            PremiumIcon {
+                                id: networkIcon
+
+                                anchors {
+                                    left: parent.left
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                source: Qt.resolvedUrl("icons/wifi.svg")
+                                size: desktop.p(10)
+                                iconOpacity: modelData.connected ? 0.95 : 0.68
+                            }
+
+                            Column {
+                                anchors {
+                                    left: networkIcon.right
+                                    leftMargin: desktop.p(6)
+                                    right: signalText.left
+                                    rightMargin: desktop.p(7)
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                spacing: desktop.p(0.5)
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.ssid
+                                    color: modelData.connected
+                                        ? desktop.graphite
+                                        : desktop.softInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(7.2)
+                                    font.weight: modelData.connected
+                                        ? Font.Medium
+                                        : Font.Normal
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.connected
+                                        ? "Connected"
+                                        : (modelData.security.length > 0
+                                            && modelData.security !== "--"
+                                            ? "Secured"
+                                            : "Open")
+                                    color: desktop.mutedInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(5.8)
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Text {
+                                id: signalText
+
+                                anchors {
+                                    right: parent.right
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                text: modelData.signal + "%"
+                                color: desktop.mutedInk
+                                font.family: "Inter"
+                                font.pixelSize: desktop.p(6.3)
+                            }
+
+                            MouseArea {
+                                id: networkMouse
+
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !desktop.wifiBusy
+                                onClicked: desktop.connectWifi(modelData.ssid)
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        height: desktop.p(12)
+                        visible: desktop.wifiMessage.length > 0
+                        text: desktop.wifiMessage
+                        color: desktop.mutedInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(6.2)
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }

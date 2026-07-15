@@ -10,3 +10,5 @@ assets/wallpaper.png
 # Fichiers temporaires
 .DS_Store
 *~
+
+shell.qml.bak-*
