@@ -6,21 +6,31 @@ ShellRoot {
         id: desktop
 
         visible: true
-        width: 1600
-        height: 900
+        width: 1648
+        height: 928
         fullscreen: true
-        title: "Precision Shell — Prototype GNOME"
+        title: "Precision Shell — Home V2"
         color: "#F6F1E8"
 
-        /*
-         * États :
-         * 1 = home au repos
-         * 2 = palette universelle
-         * 3 = réglages rapides
-         * 4 = vue de référence avec tous les panneaux
-         */
         property int viewState: 4
         property date now: new Date()
+
+        property color ivory: "#F6F1E8"
+        property color warmWhite: "#FBF9F5"
+        property color sand: "#D8CCBC"
+        property color graphite: "#302D29"
+        property color softInk: "#6D675F"
+        property color mutedInk: "#948B82"
+        property color panelBorder: "#88D8CCBC"
+
+        property var appItems: [
+            { "icon": "browser.svg",  "title": "Browse",   "subtitle": "Internet" },
+            { "icon": "terminal.svg", "title": "Terminal", "subtitle": "System" },
+            { "icon": "files.svg",    "title": "Files",    "subtitle": "Documents" },
+            { "icon": "notes.svg",    "title": "Notes",    "subtitle": "Quick capture" },
+            { "icon": "calendar.svg", "title": "Calendar", "subtitle": "Schedule" },
+            { "icon": "mail.svg",     "title": "Mail",     "subtitle": "Inbox" }
+        ]
 
         Timer {
             interval: 30000
@@ -80,113 +90,33 @@ ShellRoot {
         Component.onCompleted: searchInput.forceActiveFocus()
 
         Rectangle {
-            id: background
             anchors.fill: parent
+            color: desktop.ivory
 
-            gradient: Gradient {
-                GradientStop {
-                    position: 0.0
-                    color: "#F8F4EC"
-                }
-
-                GradientStop {
-                    position: 0.55
-                    color: "#EEE6DA"
-                }
-
-                GradientStop {
-                    position: 1.0
-                    color: "#DDD0BE"
-                }
-            }
-
-            /*
-             * Image optionnelle :
-             * ~/.config/quickshell/precision-prototype/assets/wallpaper.jpg
-             */
             Image {
                 id: wallpaper
-
                 anchors.fill: parent
                 source: Qt.resolvedUrl("assets/wallpaper.jpg")
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 cache: false
-
-                opacity: status === Image.Ready ? 1 : 0
-
-                Behavior on opacity {
-                    NumberAnimation {
-                        duration: 250
-                    }
-                }
             }
 
-            /*
-             * Voile chaud pour garder la lisibilité,
-             * même avec une photographie contrastée.
-             */
             Rectangle {
                 anchors.fill: parent
-                color: wallpaper.status === Image.Ready
-                       ? "#28F6F1E8"
-                       : "transparent"
+                color: "#16F6F1E8"
             }
 
-            /*
-             * Emplacement provisoire de la photographie.
-             */
-            Column {
-                visible: wallpaper.status !== Image.Ready
-
-                anchors {
-                    horizontalCenter: parent.horizontalCenter
-                    verticalCenter: parent.verticalCenter
-                }
-
-                spacing: 10
-
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "911"
-                    color: "#B9AC99"
-                    font.family: "Inter"
-                    font.pixelSize: 86
-                    font.weight: Font.Light
-                    font.letterSpacing: 12
-                }
-
-                Rectangle {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: 250
-                    height: 1
-                    color: "#C9BCAA"
-                }
-
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "assets/wallpaper.jpg"
-                    color: "#847B70"
-                    font.family: "Inter"
-                    font.pixelSize: 12
-                    font.letterSpacing: 1
-                }
-            }
-
-            /*
-             * Bande supérieure.
-             */
             Rectangle {
                 id: topBar
-
                 anchors {
                     top: parent.top
                     left: parent.left
                     right: parent.right
                 }
 
-                height: 43
-                color: "#EAFBF9F5"
+                height: 42
+                color: "#F6FBF9F5"
 
                 Rectangle {
                     anchors {
@@ -194,36 +124,55 @@ ShellRoot {
                         right: parent.right
                         bottom: parent.bottom
                     }
-
                     height: 1
-                    color: "#45CFC4B6"
+                    color: "#42D8CCBC"
                 }
 
                 Row {
                     anchors {
                         left: parent.left
-                        leftMargin: 28
+                        leftMargin: 18
                         verticalCenter: parent.verticalCenter
                     }
+                    spacing: 22
 
-                    spacing: 24
-
-                    Text {
-                        text: "⌁"
-                        color: "#302D29"
-                        font.pixelSize: 15
+                    PremiumIcon {
+                        source: Qt.resolvedUrl("icons/system-mark.svg")
+                        size: 16
                     }
 
-                    Text {
-                        text: "Home"
-                        color: "#302D29"
-                        font.family: "Inter"
-                        font.pixelSize: 11
+                    Item {
+                        width: 42
+                        height: 26
+
+                        Text {
+                            anchors {
+                                horizontalCenter: parent.horizontalCenter
+                                top: parent.top
+                                topMargin: 2
+                            }
+                            text: "Home"
+                            color: desktop.graphite
+                            font.family: "Inter"
+                            font.pixelSize: 11
+                        }
+
+                        Rectangle {
+                            width: 3
+                            height: 3
+                            radius: 1.5
+                            color: desktop.softInk
+                            anchors {
+                                horizontalCenter: parent.horizontalCenter
+                                bottom: parent.bottom
+                                bottomMargin: 1
+                            }
+                        }
                     }
 
                     Text {
                         text: "Work"
-                        color: "#817A72"
+                        color: desktop.mutedInk
                         font.family: "Inter"
                         font.pixelSize: 11
                     }
@@ -231,308 +180,301 @@ ShellRoot {
 
                 Text {
                     anchors.centerIn: parent
-
-                    text: Qt.formatDateTime(
-                              desktop.now,
-                              "ddd d MMM  ·  hh:mm"
-                          )
-
-                    color: "#6D675F"
+                    text: Qt.formatDateTime(desktop.now, "ddd, MMM d    hh:mm AP")
+                    color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: 11
+                    font.pixelSize: 10
                 }
 
                 Row {
                     anchors {
                         right: parent.right
-                        rightMargin: 28
+                        rightMargin: 16
                         verticalCenter: parent.verticalCenter
                     }
+                    spacing: 13
 
-                    spacing: 17
-
-                    Text {
-                        text: "⌁"
-                        color: "#6D675F"
-                        font.pixelSize: 12
+                    PremiumIcon {
+                        source: Qt.resolvedUrl("icons/volume.svg")
+                        size: 15
                     }
 
-                    Text {
-                        text: "◉"
-                        color: "#6D675F"
-                        font.pixelSize: 10
+                    PremiumIcon {
+                        source: Qt.resolvedUrl("icons/wifi.svg")
+                        size: 15
                     }
 
-                    Text {
-                        text: "▰"
-                        color: "#6D675F"
-                        font.pixelSize: 11
+                    PremiumIcon {
+                        source: Qt.resolvedUrl("icons/battery.svg")
+                        size: 17
                     }
 
                     Text {
                         text: "100%"
-                        color: "#6D675F"
+                        color: desktop.softInk
                         font.family: "Inter"
                         font.pixelSize: 10
                     }
                 }
             }
 
-            /*
-             * Phrase principale.
-             */
             Column {
-                x: parent.width * 0.145
-                y: parent.height * 0.355
-                spacing: 1
+                x: parent.width * 0.118
+                y: parent.height * 0.317
+                spacing: 0
 
                 Text {
                     text: "Focus"
-                    color: "#302D29"
+                    color: desktop.graphite
                     font.family: "Inter"
-                    font.pixelSize: Math.max(27, parent.parent.width * 0.019)
+                    font.pixelSize: 34
                     font.weight: Font.Light
                 }
 
                 Text {
                     text: "is a form of precision."
-                    color: "#615B54"
+                    color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: Math.max(25, parent.parent.width * 0.018)
+                    font.pixelSize: 32
                     font.weight: Font.Light
                 }
 
                 Text {
-                    topPadding: 16
-                    text: "Good evening."
-                    color: "#8B837A"
+                    topPadding: 22
+                    text: "Good evening, Alexis."
+                    color: desktop.mutedInk
                     font.family: "Inter"
                     font.pixelSize: 10
-                    font.letterSpacing: 0.6
                 }
             }
 
-            /*
-             * Information contextuelle optionnelle.
-             */
             Column {
                 anchors {
                     right: parent.right
-                    rightMargin: parent.width * 0.08
+                    rightMargin: parent.width * 0.078
                     top: parent.top
-                    topMargin: parent.height * 0.18
+                    topMargin: parent.height * 0.145
                 }
+                spacing: 7
 
-                spacing: 5
+                Row {
+                    spacing: 9
 
-                Text {
-                    text: "☼  18°"
-                    color: "#514C46"
-                    font.family: "Inter"
-                    font.pixelSize: 18
-                    font.weight: Font.Light
+                    PremiumIcon {
+                        source: Qt.resolvedUrl("icons/brightness.svg")
+                        size: 22
+                    }
+
+                    Text {
+                        text: "18°"
+                        color: desktop.softInk
+                        font.family: "Inter"
+                        font.pixelSize: 20
+                        font.weight: Font.Light
+                    }
                 }
 
                 Text {
                     text: "Versailles"
-                    color: "#6D675F"
+                    color: desktop.softInk
                     font.family: "Inter"
-                    font.pixelSize: 10
+                    font.pixelSize: 9
                 }
 
                 Text {
-                    topPadding: 14
-                    text: "□  Design system"
-                    color: "#6D675F"
+                    text: "Sunny"
+                    color: desktop.mutedInk
                     font.family: "Inter"
-                    font.pixelSize: 10
+                    font.pixelSize: 9
+                }
+
+                Rectangle {
+                    width: 72
+                    height: 1
+                    color: "#60D8CCBC"
+                }
+
+                Row {
+                    spacing: 7
+
+                    PremiumIcon {
+                        source: Qt.resolvedUrl("icons/calendar.svg")
+                        size: 13
+                    }
+
+                    Text {
+                        text: "Design system"
+                        color: desktop.softInk
+                        font.family: "Inter"
+                        font.pixelSize: 9
+                    }
                 }
 
                 Text {
                     text: "in 40 min"
-                    color: "#938B82"
+                    color: desktop.mutedInk
                     font.family: "Inter"
                     font.pixelSize: 9
                 }
             }
 
-            /*
-             * Bibliothèque latérale.
-             */
             Rectangle {
                 id: libraryPanel
-
                 property bool opened: desktop.viewState === 4
 
                 anchors {
                     left: parent.left
-                    leftMargin: 38
+                    leftMargin: 26
                     bottom: parent.bottom
-                    bottomMargin: 56
+                    bottomMargin: 27
                 }
 
-                width: 122
-                height: 172
-                radius: 9
-
-                color: "#F2FBF9F5"
+                width: 148
+                height: 174
+                radius: 10
+                color: "#EFFBF9F5"
                 border.width: 1
-                border.color: "#80D8CCBC"
+                border.color: desktop.panelBorder
 
                 opacity: opened ? 1 : 0
-                y: opened ? parent.height - height - 56
-                          : parent.height - height - 46
-
+                scale: opened ? 1 : 0.985
                 enabled: opened
 
                 Behavior on opacity {
-                    NumberAnimation {
-                        duration: 170
-                        easing.type: Easing.OutCubic
-                    }
+                    NumberAnimation { duration: 170; easing.type: Easing.OutCubic }
                 }
 
-                Behavior on y {
-                    NumberAnimation {
-                        duration: 170
-                        easing.type: Easing.OutCubic
-                    }
+                Behavior on scale {
+                    NumberAnimation { duration: 170; easing.type: Easing.OutCubic }
                 }
 
                 Column {
                     anchors {
                         fill: parent
-                        margins: 18
+                        margins: 15
                     }
-
-                    spacing: 15
+                    spacing: 13
 
                     Text {
                         text: "Apps"
-                        color: "#302D29"
+                        color: desktop.graphite
                         font.family: "Inter"
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                         font.weight: Font.Medium
                     }
 
                     Text {
                         text: "Recent"
-                        color: "#6D675F"
+                        color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: 10
+                        font.pixelSize: 9
                     }
 
                     Text {
                         text: "Documents"
-                        color: "#6D675F"
+                        color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: 10
+                        font.pixelSize: 9
                     }
 
                     Text {
                         text: "Downloads"
-                        color: "#6D675F"
+                        color: desktop.softInk
                         font.family: "Inter"
-                        font.pixelSize: 10
+                        font.pixelSize: 9
                     }
 
-                    Item {
-                        width: 1
-                        height: 6
+                    Item { width: 1; height: 9 }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: "#55D8CCBC"
                     }
 
-                    Text {
-                        text: "Show all        ·"
-                        color: "#6D675F"
-                        font.family: "Inter"
-                        font.pixelSize: 10
+                    Row {
+                        width: parent.width
+
+                        Text {
+                            width: parent.width - 20
+                            text: "Show All"
+                            color: desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: 9
+                        }
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/expand.svg")
+                            size: 13
+                        }
                     }
                 }
             }
 
-            /*
-             * Palette universelle.
-             */
             Rectangle {
                 id: commandPalette
-
-                property bool opened: desktop.viewState === 2
-                                      || desktop.viewState === 4
+                property bool opened: desktop.viewState === 2 || desktop.viewState === 4
 
                 anchors {
                     horizontalCenter: parent.horizontalCenter
                     bottom: parent.bottom
-                    bottomMargin: 58
+                    bottomMargin: 99
                 }
 
-                width: Math.min(parent.width * 0.48, 720)
-                height: 124
+                width: Math.min(parent.width * 0.48, 568)
+                height: 125
                 radius: 11
-
-                color: "#F4FBF9F5"
+                color: "#EFFBF9F5"
                 border.width: 1
-                border.color: "#98D8CCBC"
+                border.color: desktop.panelBorder
+                clip: true
 
                 opacity: opened ? 1 : 0
                 scale: opened ? 1 : 0.985
                 enabled: opened
-                clip: true
 
                 Behavior on opacity {
-                    NumberAnimation {
-                        duration: 165
-                        easing.type: Easing.OutCubic
-                    }
+                    NumberAnimation { duration: 165; easing.type: Easing.OutCubic }
                 }
 
                 Behavior on scale {
-                    NumberAnimation {
-                        duration: 165
-                        easing.type: Easing.OutCubic
-                    }
+                    NumberAnimation { duration: 165; easing.type: Easing.OutCubic }
                 }
 
-                Rectangle {
+                Item {
                     anchors {
+                        top: parent.top
                         left: parent.left
                         right: parent.right
-                        top: parent.top
                     }
+                    height: 43
 
-                    height: 47
-                    color: "transparent"
-
-                    Text {
+                    PremiumIcon {
                         anchors {
                             left: parent.left
-                            leftMargin: 19
+                            leftMargin: 16
                             verticalCenter: parent.verticalCenter
                         }
-
-                        text: "⌕"
-                        color: "#817A72"
-                        font.pixelSize: 15
+                        source: Qt.resolvedUrl("icons/search.svg")
+                        size: 15
                     }
 
                     TextInput {
                         id: searchInput
-
                         anchors {
                             left: parent.left
-                            leftMargin: 45
+                            leftMargin: 42
                             right: parent.right
-                            rightMargin: 52
+                            rightMargin: 48
                             verticalCenter: parent.verticalCenter
                         }
 
-                        height: 28
-                        color: "#302D29"
-                        selectionColor: "#D8CCBC"
-                        selectedTextColor: "#302D29"
-
+                        height: 25
+                        color: desktop.graphite
+                        selectionColor: desktop.sand
+                        selectedTextColor: desktop.graphite
                         font.family: "Inter"
-                        font.pixelSize: 11
-
+                        font.pixelSize: 10
                         selectByMouse: true
                         cursorVisible: activeFocus
                     }
@@ -542,26 +484,23 @@ ShellRoot {
                             left: searchInput.left
                             verticalCenter: searchInput.verticalCenter
                         }
-
                         visible: searchInput.text.length === 0
-
-                        text: "Search or type a command…"
-                        color: "#9A9289"
+                        text: "Search or type a command..."
+                        color: "#A19990"
                         font.family: "Inter"
-                        font.pixelSize: 11
+                        font.pixelSize: 10
                     }
 
                     Text {
                         anchors {
                             right: parent.right
-                            rightMargin: 18
+                            rightMargin: 15
                             verticalCenter: parent.verticalCenter
                         }
-
                         text: "⌘ K"
-                        color: "#AAA198"
+                        color: "#A89F96"
                         font.family: "Inter"
-                        font.pixelSize: 9
+                        font.pixelSize: 8
                     }
                 }
 
@@ -570,209 +509,340 @@ ShellRoot {
                         left: parent.left
                         right: parent.right
                         top: parent.top
-                        topMargin: 47
+                        topMargin: 43
                     }
-
                     height: 1
-                    color: "#70D8CCBC"
+                    color: "#5AD8CCBC"
                 }
 
                 Row {
                     anchors {
                         horizontalCenter: parent.horizontalCenter
                         bottom: parent.bottom
-                        bottomMargin: 15
+                        bottomMargin: 12
                     }
-
-                    spacing: 42
+                    spacing: 26
 
                     Repeater {
-                        model: [
-                            { "icon": "◉", "label": "Browse" },
-                            { "icon": ">_", "label": "Terminal" },
-                            { "icon": "□", "label": "Files" },
-                            { "icon": "◇", "label": "Notes" },
-                            { "icon": "▦", "label": "Calendar" },
-                            { "icon": "✉", "label": "Mail" }
-                        ]
+                        model: desktop.appItems
 
                         delegate: Column {
-                            width: 62
-                            spacing: 7
+                            width: 64
+                            spacing: 4
 
-                            Text {
+                            PremiumIcon {
                                 anchors.horizontalCenter: parent.horizontalCenter
-
-                                text: modelData.icon
-                                color: "#69625B"
-                                font.family: "Inter"
-                                font.pixelSize: 15
+                                source: Qt.resolvedUrl("icons/" + modelData.icon)
+                                size: 21
                             }
 
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
-
-                                text: modelData.label
-                                color: "#4F4A45"
+                                text: modelData.title
+                                color: desktop.graphite
                                 font.family: "Inter"
                                 font.pixelSize: 9
+                            }
+
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: modelData.subtitle
+                                color: desktop.mutedInk
+                                font.family: "Inter"
+                                font.pixelSize: 7
                             }
                         }
                     }
                 }
             }
 
-            /*
-             * Réglages rapides.
-             */
             Rectangle {
                 id: settingsPanel
-
-                property bool opened: desktop.viewState === 3
-                                      || desktop.viewState === 4
+                property bool opened: desktop.viewState === 3 || desktop.viewState === 4
 
                 anchors {
                     right: parent.right
-                    rightMargin: 38
+                    rightMargin: 26
                     bottom: parent.bottom
-                    bottomMargin: 56
+                    bottomMargin: 27
                 }
 
-                width: 158
+                width: 174
                 height: 174
-                radius: 9
-
-                color: "#F2FBF9F5"
+                radius: 10
+                color: "#EFFBF9F5"
                 border.width: 1
-                border.color: "#80D8CCBC"
+                border.color: desktop.panelBorder
 
                 opacity: opened ? 1 : 0
-                y: opened ? parent.height - height - 56
-                          : parent.height - height - 46
-
+                scale: opened ? 1 : 0.985
                 enabled: opened
 
                 Behavior on opacity {
-                    NumberAnimation {
-                        duration: 180
-                        easing.type: Easing.OutCubic
-                    }
+                    NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
                 }
 
-                Behavior on y {
-                    NumberAnimation {
-                        duration: 180
-                        easing.type: Easing.OutCubic
-                    }
+                Behavior on scale {
+                    NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
                 }
 
                 Column {
                     anchors {
                         fill: parent
-                        margins: 17
+                        margins: 13
                     }
-
-                    spacing: 11
+                    spacing: 9
 
                     Row {
                         width: parent.width
+                        spacing: 9
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/wifi.svg")
+                            size: 14
+                        }
 
                         Text {
-                            width: parent.width - 12
+                            width: 85
                             text: "Wi-Fi"
-                            color: "#302D29"
+                            color: desktop.graphite
                             font.family: "Inter"
-                            font.pixelSize: 10
+                            font.pixelSize: 9
                         }
 
                         Text {
-                            text: "●"
-                            color: "#655F58"
-                            font.pixelSize: 9
+                            width: 31
+                            text: "Studio"
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: 8
+                        }
+
+                        Rectangle {
+                            width: 22
+                            height: 12
+                            radius: 6
+                            color: desktop.softInk
+
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: desktop.warmWhite
+                                anchors {
+                                    right: parent.right
+                                    rightMargin: 2
+                                    verticalCenter: parent.verticalCenter
+                                }
+                            }
                         }
                     }
 
                     Row {
                         width: parent.width
+                        spacing: 9
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/bluetooth.svg")
+                            size: 14
+                        }
 
                         Text {
-                            width: parent.width - 12
+                            width: 85
                             text: "Bluetooth"
-                            color: "#6D675F"
+                            color: desktop.softInk
                             font.family: "Inter"
-                            font.pixelSize: 10
+                            font.pixelSize: 9
                         }
 
                         Text {
-                            text: "●"
-                            color: "#8D857C"
-                            font.pixelSize: 9
+                            width: 31
+                            text: "On"
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: 8
+                        }
+
+                        Rectangle {
+                            width: 22
+                            height: 12
+                            radius: 6
+                            color: desktop.softInk
+
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: desktop.warmWhite
+                                anchors {
+                                    right: parent.right
+                                    rightMargin: 2
+                                    verticalCenter: parent.verticalCenter
+                                }
+                            }
                         }
                     }
 
                     Row {
                         width: parent.width
+                        spacing: 9
 
-                        Text {
-                            width: parent.width - 12
-                            text: "Do Not Disturb"
-                            color: "#6D675F"
-                            font.family: "Inter"
-                            font.pixelSize: 10
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/moon.svg")
+                            size: 14
                         }
 
                         Text {
-                            text: "○"
-                            color: "#8D857C"
+                            width: 85
+                            text: "Do Not Disturb"
+                            color: desktop.softInk
+                            font.family: "Inter"
                             font.pixelSize: 9
+                        }
+
+                        Text {
+                            width: 31
+                            text: "Off"
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: 8
+                        }
+
+                        Rectangle {
+                            width: 22
+                            height: 12
+                            radius: 6
+                            color: "#B6AEA5"
+
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: desktop.warmWhite
+                                anchors {
+                                    left: parent.left
+                                    leftMargin: 2
+                                    verticalCenter: parent.verticalCenter
+                                }
+                            }
                         }
                     }
 
                     Rectangle {
                         width: parent.width
                         height: 1
-                        color: "#70D8CCBC"
+                        color: "#5AD8CCBC"
                     }
 
-                    Text {
-                        text: "Display"
-                        color: "#6D675F"
-                        font.family: "Inter"
-                        font.pixelSize: 10
-                    }
-
-                    Rectangle {
+                    Row {
                         width: parent.width
-                        height: 3
-                        radius: 2
-                        color: "#D8CCBC"
+                        spacing: 9
 
-                        Rectangle {
-                            width: parent.width * 0.64
-                            height: parent.height
-                            radius: parent.radius
-                            color: "#6D675F"
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/display.svg")
+                            size: 14
+                        }
+
+                        Text {
+                            width: parent.width - 33
+                            text: "Display"
+                            color: desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: 9
+                        }
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/chevron-right.svg")
+                            size: 12
                         }
                     }
 
-                    Text {
-                        text: "Audio"
-                        color: "#6D675F"
-                        font.family: "Inter"
-                        font.pixelSize: 10
-                    }
-
-                    Rectangle {
+                    Row {
                         width: parent.width
-                        height: 3
-                        radius: 2
-                        color: "#D8CCBC"
+                        spacing: 8
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/volume.svg")
+                            size: 14
+                        }
 
                         Rectangle {
-                            width: parent.width * 0.43
-                            height: parent.height
-                            radius: parent.radius
-                            color: "#6D675F"
+                            width: 100
+                            height: 2
+                            radius: 1
+                            color: "#CBC1B5"
+
+                            Rectangle {
+                                width: 56
+                                height: parent.height
+                                radius: parent.radius
+                                color: desktop.softInk
+                            }
+
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: desktop.warmWhite
+                                border.width: 1
+                                border.color: "#AFA69D"
+                                anchors {
+                                    left: parent.left
+                                    leftMargin: 52
+                                    verticalCenter: parent.verticalCenter
+                                }
+                            }
+                        }
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/volume.svg")
+                            size: 12
+                        }
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: 8
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/brightness.svg")
+                            size: 14
+                        }
+
+                        Rectangle {
+                            width: 100
+                            height: 2
+                            radius: 1
+                            color: "#CBC1B5"
+
+                            Rectangle {
+                                width: 35
+                                height: parent.height
+                                radius: parent.radius
+                                color: desktop.softInk
+                            }
+
+                            Rectangle {
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: desktop.warmWhite
+                                border.width: 1
+                                border.color: "#AFA69D"
+                                anchors {
+                                    left: parent.left
+                                    leftMargin: 31
+                                    verticalCenter: parent.verticalCenter
+                                }
+                            }
+                        }
+
+                        PremiumIcon {
+                            source: Qt.resolvedUrl("icons/brightness.svg")
+                            size: 12
                         }
                     }
                 }
