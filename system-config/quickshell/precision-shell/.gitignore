@@ -12,6 +12,3 @@ assets/wallpaper.png
 *~
 
 shell.qml.bak-*
-*.backup-*
-*.bak-*
-__pycache__/

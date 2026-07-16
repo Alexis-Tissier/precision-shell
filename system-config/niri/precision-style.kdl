@@ -1,0 +1,79 @@
+prefer-no-csd
+
+// Precision Shell — barless mode
+layout {
+    gaps 8
+
+    center-focused-column "on-overflow"
+    always-center-single-column
+
+    preset-column-widths {
+        proportion 0.62
+        proportion 0.82
+        proportion 0.94
+    }
+
+    default-column-width { proportion 0.88; }
+
+    focus-ring {
+        on
+        width 1
+        active-color "#8A81788E"
+        inactive-color "#8A81782A"
+        urgent-color "#A85D4F"
+    }
+
+    border {
+        off
+    }
+
+    shadow {
+        off
+    }
+
+    tab-indicator {
+        off
+    }
+
+    insert-hint {
+        on
+        color "#8A81783C"
+    }
+
+    background-color "#EEE8DE"
+}
+
+window-rule {
+    geometry-corner-radius 10
+    clip-to-geometry true
+    draw-border-with-background false
+}
+
+window-rule {
+    match app-id=r#"^brave-browser$"#
+
+    open-maximized true
+    geometry-corner-radius 8
+}
+
+window-rule {
+    match app-id=r#"^Alacritty$"#
+
+    default-column-width { proportion 0.82; }
+    geometry-corner-radius 10
+}
+
+window-rule {
+    match is-floating=true
+
+    geometry-corner-radius 14
+
+    shadow {
+        on
+        softness 28
+        spread 0
+        offset x=0 y=9
+        color "#00000042"
+        inactive-color "#00000028"
+    }
+}

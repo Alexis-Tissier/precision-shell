@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PRECISION_DIR="$HOME/.config/gtklock/precision"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/precision-lock"
+WALLPAPER="${PRECISION_WALLPAPER:-$HOME/.config/quickshell/precision-shell/assets/wallpaper.jpg}"
+LOCK_WALLPAPER=""
+
+mkdir -p "$CACHE_DIR"
+
+# Use the exact desktop wallpaper file. Readability is handled by
+# a transparent GTK overlay, so the photo itself is never altered.
+if [[ -f "$WALLPAPER" ]]; then
+    LOCK_WALLPAPER="$WALLPAPER"
+fi
+
+WIFI_ICON="network-wireless-offline-symbolic"
+WIFI_LABEL="Hors ligne"
+
+if command -v nmcli >/dev/null 2>&1; then
+    WIFI_RADIO="$(nmcli -t -f WIFI general 2>/dev/null || true)"
+    SSID="$(
+        nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null \
+            | sed -n 's/^yes://p' \
+            | head -n 1
+    )"
+
+    if [[ "$WIFI_RADIO" == "enabled" && -n "$SSID" ]]; then
+        WIFI_ICON="network-wireless-signal-excellent-symbolic"
+        WIFI_LABEL="Wi-Fi"
+    elif [[ "$WIFI_RADIO" == "enabled" ]]; then
+        WIFI_ICON="network-wireless-signal-none-symbolic"
+        WIFI_LABEL="Wi-Fi"
+    else
+        WIFI_ICON="network-wireless-offline-symbolic"
+        WIFI_LABEL="Wi-Fi désactivé"
+    fi
+fi
+
+BATTERY_ICON="battery-missing-symbolic"
+BATTERY_LABEL="—"
+
+BATTERY_PATH="$(
+    find /sys/class/power_supply \
+        -maxdepth 1 \
+        -type l \
+        -name 'BAT*' \
+        2>/dev/null \
+        | head -n 1
+)"
+
+if [[ -n "$BATTERY_PATH" && -r "$BATTERY_PATH/capacity" ]]; then
+    CAPACITY="$(cat "$BATTERY_PATH/capacity")"
+    STATUS="$(cat "$BATTERY_PATH/status" 2>/dev/null || true)"
+    BATTERY_LABEL="${CAPACITY} %"
+
+    if (( CAPACITY >= 90 )); then
+        BATTERY_ICON="battery-full-symbolic"
+    elif (( CAPACITY >= 60 )); then
+        BATTERY_ICON="battery-good-symbolic"
+    elif (( CAPACITY >= 30 )); then
+        BATTERY_ICON="battery-low-symbolic"
+    else
+        BATTERY_ICON="battery-caution-symbolic"
+    fi
+
+    if [[ "$STATUS" == "Charging" ]]; then
+        if (( CAPACITY >= 90 )); then
+            BATTERY_ICON="battery-full-charging-symbolic"
+        elif (( CAPACITY >= 60 )); then
+            BATTERY_ICON="battery-good-charging-symbolic"
+        elif (( CAPACITY >= 30 )); then
+            BATTERY_ICON="battery-low-charging-symbolic"
+        else
+            BATTERY_ICON="battery-caution-charging-symbolic"
+        fi
+    fi
+fi
+
+python3 - \
+    "$PRECISION_DIR/layout.template.xml" \
+    "$PRECISION_DIR/layout.xml" \
+    "$WIFI_ICON" \
+    "$WIFI_LABEL" \
+    "$BATTERY_ICON" \
+    "$BATTERY_LABEL" <<'PY'
+from html import escape
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+
+text = source.read_text(encoding="utf-8")
+replacements = {
+    "__WIFI_ICON__": escape(sys.argv[3]),
+    "__WIFI_LABEL__": escape(sys.argv[4]),
+    "__BATTERY_ICON__": escape(sys.argv[5]),
+    "__BATTERY_LABEL__": escape(sys.argv[6]),
+}
+
+for key, value in replacements.items():
+    text = text.replace(key, value)
+
+target.write_text(text, encoding="utf-8")
+ET.parse(target)
+PY
+
+python3 - \
+    "$PRECISION_DIR/style.template.css" \
+    "$PRECISION_DIR/style.css" \
+    "$LOCK_WALLPAPER" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+wallpaper = sys.argv[3]
+
+css = source.read_text(encoding="utf-8")
+
+if wallpaper:
+    escaped = wallpaper.replace("\\", "\\\\").replace('"', '\\"')
+    css = css.replace("__WALLPAPER__", escaped)
+else:
+    css = css.replace(
+        'background-image: url("__WALLPAPER__");',
+        'background-image: none;'
+    )
+
+target.write_text(css, encoding="utf-8")
+PY

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/precision-lock.lock"
+flock -n 9 || exit 0
+
+if pgrep -x gtklock >/dev/null 2>&1; then
+    exit 0
+fi
+
+"/home/alexistissier/.local/bin/precision-lock-prepare"
+
+export LC_TIME=fr_FR.UTF-8
+exec "/usr/bin/gtklock"     --config "/home/alexistissier/.config/gtklock/precision/config-lock-only.ini"
