@@ -8,8 +8,39 @@ ShellRoot {
     id: root
 
     property bool launcherOpen: false
+    property bool launcherAllMode: false
     property bool dashboardOpen: false
+    property bool dashboardWifiMenuOpen: false
     property bool desktopWidgetsVisible: true
+    property bool settingsOpen: false
+    property real panelOpacity: 1.0
+    property real overlayDarkness: 0.32
+    property int defaultViewState: 4
+
+    function openSettings(section) {
+        if (root.launcherOpen)
+            root.closeLauncher()
+        if (root.dashboardOpen)
+            root.closeDashboard()
+        if (root.switcherOpen)
+            root.closeSwitcher()
+
+        settingsOpen = true
+        if (section !== undefined)
+            precisionSettings.selectedSection = Math.max(0, Math.min(3, section))
+    }
+
+    function closeSettings() {
+        settingsOpen = false
+        precisionSettings.clearConfirmation()
+    }
+
+    function toggleSettings() {
+        if (settingsOpen)
+            closeSettings()
+        else
+            openSettings(0)
+    }
 
     property var niriWorkspaces: []
     property var niriWindows: []
@@ -58,42 +89,64 @@ ShellRoot {
         }
     }
 
-    function openLauncher() {
-        dashboardOpen = false
-        launcherOpen = true
-        launcherSearch.text = ""
+function openLauncher(showAll) {
+    settingsOpen = false
+    dashboardOpen = false
+    launcherAllMode = showAll === true
+    launcherOpen = true
+    launcherSearch.text = ""
 
-        Qt.callLater(function() {
-            launcherSearch.forceActiveFocus()
-        })
+    if (launcherAllMode
+            && !desktop.allAppsLoaded
+            && !allAppsReader.running) {
+        allAppsReader.running = true
     }
 
-    function closeLauncher() {
-        launcherOpen = false
-        launcherSearch.text = ""
-        launcherSearch.focus = false
-    }
+    Qt.callLater(function() {
+        launcherSearch.forceActiveFocus()
+    })
+}
 
-    function toggleLauncher() {
-        if (launcherOpen)
-            closeLauncher()
-        else
-            openLauncher()
-    }
+function openAllApplications() {
+    openLauncher(true)
+}
+
+function closeLauncher() {
+    launcherOpen = false
+    launcherSearch.text = ""
+    launcherSearch.focus = false
+    launcherAllMode = false
+}
+
+function toggleLauncher() {
+    if (launcherOpen)
+        closeLauncher()
+    else
+        openLauncher(false)
+}
 
     function openDashboard() {
+        root.dashboardWifiMenuOpen = false
+    settingsOpen = false
+    if (root.launcherOpen) {
+        root.closeLauncher()
+    }
         launcherOpen = false
         dashboardOpen = true
         dashboardSearch.text = ""
     }
 
     function closeDashboard() {
+        root.dashboardWifiMenuOpen = false
         dashboardOpen = false
         dashboardSearch.text = ""
         dashboardSearch.focus = false
     }
 
     function toggleDashboard() {
+    if (root.launcherOpen) {
+        root.closeLauncher()
+    }
         if (dashboardOpen)
             closeDashboard()
         else
@@ -288,6 +341,10 @@ ShellRoot {
     }
 
     function beginSwitcher(direction) {
+    settingsOpen = false
+    if (root.launcherOpen) {
+        root.closeLauncher()
+    }
         const items = buildSwitcherItems()
 
         if (items.length < 2)
@@ -304,8 +361,7 @@ ShellRoot {
 
         switcherOpen = true
         switcherSafetyTimer.restart()
-
-        Qt.callLater(function() {
+Qt.callLater(function() {
             switcherKeyCatcher.forceActiveFocus()
         })
     }
@@ -319,14 +375,14 @@ ShellRoot {
         ) % switcherItems.length
 
         switcherSafetyTimer.restart()
-    }
+}
 
     function closeSwitcher() {
         switcherOpen = false
         switcherItems = []
         switcherIndex = 0
         switcherSafetyTimer.stop()
-    }
+}
 
     function confirmSwitcher() {
         if (!switcherOpen || switcherItems.length === 0) {
@@ -358,10 +414,11 @@ ShellRoot {
         closeSwitcher()
     }
 
+
     Timer {
         id: switcherSafetyTimer
 
-        interval: 1500
+        interval: 30000
         repeat: false
 
         onTriggered: root.confirmSwitcher()
@@ -427,6 +484,24 @@ ShellRoot {
         function close(): void {
             root.cancelSwitcher()
         }
+    
+
+        function confirm(): void {
+            root.confirmSwitcher()
+        }
+}
+
+    IpcHandler {
+        target: "settingsPage"
+
+        function open(): void { root.openSettings(0) }
+        function appearance(): void { root.openSettings(0) }
+        function system(): void { root.openSettings(1) }
+        function shortcuts(): void { root.openSettings(2) }
+        function session(): void { root.openSettings(3) }
+        function close(): void { root.closeSettings() }
+        function toggle(): void { root.toggleSettings() }
+        function isOpen(): bool { return root.settingsOpen }
     }
 
     IpcHandler {
@@ -447,6 +522,15 @@ ShellRoot {
         function isVisible(): bool {
             return root.desktopWidgetsVisible
         }
+    }
+
+    IpcHandler {
+        target: "desktopView"
+
+        function hide(): void { desktop.applyViewState(1) }
+        function palette(): void { desktop.applyViewState(2) }
+        function settings(): void { desktop.applyViewState(3) }
+        function all(): void { desktop.applyViewState(4) }
     }
 
     IpcHandler {
@@ -490,6 +574,9 @@ ShellRoot {
 
                 if (root.dashboardOpen)
                     root.closeDashboard()
+
+                if (root.settingsOpen)
+                    root.closeSettings()
             }
         }
     }
@@ -783,6 +870,7 @@ ShellRoot {
         property bool restoreWidgetsOnFocus: false
 
         property int batteryPercent: 100
+        property bool batteryCharging: false
         property real volumeLevel: 0.0
         property real brightnessLevel: 0.54
         property real pendingVolumeLevel: 0.0
@@ -794,6 +882,7 @@ ShellRoot {
 
         property bool wifiEnabled: true
         property bool wifiConnected: false
+        property int wifiSignal: 0
         property bool wifiBusy: false
         property bool wifiMenuOpen: false
         property bool wifiScanning: false
@@ -810,6 +899,10 @@ ShellRoot {
         property string bluetoothMessage: ""
         property string bluetoothError: ""
         property var bluetoothDevices: []
+
+        property bool dndEnabled: false
+        property bool dndBusy: false
+        property string dndError: ""
 
         readonly property var dayNames: [
             "Sunday", "Monday", "Tuesday", "Wednesday",
@@ -848,22 +941,130 @@ ShellRoot {
         readonly property color softInk: "#6D675F"
         readonly property color mutedInk: "#948B82"
         readonly property color panelBorder: "#4FCFC4B6"
-        readonly property color panelSurface: "#DDFBF9F5"
+        readonly property color panelSurface: Qt.rgba(251 / 255, 249 / 255, 245 / 255, root.panelOpacity)
+property real weatherTemperature: NaN
+property int weatherCode: -1
+property bool weatherIsDay: true
+property string weatherSummary: "Updating..."
+property string weatherSymbol: "◌"
+property string weatherLocation: "__WEATHER_LOCATION__"
+property real weatherLatitude: 48.8014
+property real weatherLongitude: 2.1301
+property date weatherUpdatedAt: new Date(0)
+
+function applyViewState(state) {
+    root.desktopWidgetsVisible = true
+    viewState = state
+    wifiMenuOpen = false
+    bluetoothMenuOpen = false
+
+    if (state === 2 || state === 4) {
+        Qt.callLater(function() {
+            searchInput.forceActiveFocus()
+        })
+    } else {
+        searchInput.text = ""
+        searchInput.focus = false
+    }
+}
+
+function weatherSummaryForCode(code) {
+    if (code === 0) return weatherIsDay ? "Clear" : "Clear night"
+    if (code === 1) return "Mostly clear"
+    if (code === 2) return "Partly cloudy"
+    if (code === 3) return "Overcast"
+    if (code === 45 || code === 48) return "Fog"
+    if (code >= 51 && code <= 57) return "Drizzle"
+    if (code >= 61 && code <= 67) return "Rain"
+    if (code >= 71 && code <= 77) return "Snow"
+    if (code >= 80 && code <= 82) return "Showers"
+    if (code === 85 || code === 86) return "Snow showers"
+    if (code >= 95) return "Thunderstorm"
+    return "Weather unavailable"
+}
+
+function weatherSymbolForCode(code) {
+    if (code === 0) return weatherIsDay ? "☀" : "☾"
+    if (code <= 2) return weatherIsDay ? "◐" : "☾"
+    if (code === 3 || code === 45 || code === 48) return "☁"
+    if (code >= 51 && code <= 67) return "☂"
+    if (code >= 71 && code <= 77) return "❄"
+    if (code >= 80 && code <= 82) return "☂"
+    if (code === 85 || code === 86) return "❄"
+    if (code >= 95) return "⚡"
+    return "◌"
+}
+
+function refreshWeather() {
+    if (!weatherReader.running)
+        weatherReader.running = true
+}
+
+Process {
+    id: weatherReader
+    command: [
+        "bash",
+        "-lc",
+        "curl -fsS --connect-timeout 5 --max-time 12 "
+        + "\"https://api.open-meteo.com/v1/forecast?latitude="
+        + desktop.weatherLatitude
+        + "&longitude="
+        + desktop.weatherLongitude
+        + "&current=temperature_2m,weather_code,is_day&timezone=auto&forecast_days=1\""
+    ]
+
+    stdout: StdioCollector {
+        onStreamFinished: {
+            try {
+                const payload = JSON.parse(text)
+                const current = payload.current || {}
+                const temperature = parseFloat(current.temperature_2m)
+                const code = parseInt(current.weather_code)
+                const day = parseInt(current.is_day)
+
+                if (!isNaN(temperature))
+                    desktop.weatherTemperature = temperature
+
+                if (!isNaN(code))
+                    desktop.weatherCode = code
+
+                if (!isNaN(day))
+                    desktop.weatherIsDay = day === 1
+
+                desktop.weatherSummary = desktop.weatherSummaryForCode(desktop.weatherCode)
+                desktop.weatherSymbol = desktop.weatherSymbolForCode(desktop.weatherCode)
+                desktop.weatherUpdatedAt = new Date()
+            } catch (error) {
+                if (desktop.weatherCode < 0)
+                    desktop.weatherSummary = "Weather unavailable"
+                console.warn("Weather parse error:", error)
+            }
+        }
+    }
+
+    onExited: function(exitCode, exitStatus) {
+        if (exitCode !== 0 && desktop.weatherCode < 0)
+            desktop.weatherSummary = "Weather unavailable"
+    }
+}
+
+Timer {
+    id: weatherRefreshTimer
+    interval: 900000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: desktop.refreshWeather()
+}
+
 
         property var appItems: [
             {
                 "icon": "browser.svg",
-                "title": "Browse",
+                "title": "Brave",
                 "subtitle": "Internet",
                 "lookup": "Brave",
                 "fallback": ["brave-browser"]
-            },
-            {
-                "icon": "terminal.svg",
-                "title": "Terminal",
-                "subtitle": "System",
-                "lookup": "Alacritty",
-                "fallback": ["alacritty"]
             },
             {
                 "icon": "files.svg",
@@ -873,37 +1074,129 @@ ShellRoot {
                 "fallback": ["nautilus"]
             },
             {
-                "icon": "notes.svg",
-                "title": "Notes",
-                "subtitle": "Quick capture",
-                "lookup": "Text Editor",
-                "fallback": ["gnome-text-editor"]
+                "icon": "terminal.svg",
+                "title": "Terminal",
+                "subtitle": "System",
+                "lookup": "Alacritty",
+                "fallback": ["alacritty"]
             },
+            {
+                "icon": "apps.svg",
+                "title": "Settings",
+                "subtitle": "Fedora",
+                "lookup": "Fedora Settings via Precision",
+                "fallback": ["__HOME__/.local/bin/precision-open-fedora-settings"],
+                "action": "fedora-settings"
+            }
+        ,
+            {
+                            "icon": "steam.svg",
+                            "title": "Steam",
+                            "subtitle": "Games",
+                            "lookup": "Steam",
+                            "fallback": ["__HOME__/.local/bin/steam"]
+                        }
         ]
 
-        function filteredAppItems() {
+        property var allAppItems: []
+        property bool allAppsLoaded: false
+
+function launchPinnedApplication(desktopFile, lookup, fallback) {
+    if (desktopFile && desktopFile.length > 0) {
+        Quickshell.execDetached({
+            command: ["gio", "launch", desktopFile]
+        })
+    } else {
+        const entry = DesktopEntries.heuristicLookup(lookup)
+
+        if (entry !== null) {
+            entry.execute()
+        } else {
+            Quickshell.execDetached({
+                command: fallback
+            })
+        }
+    }
+
+    root.closeLauncher()
+    root.closeDashboard()
+}
+
+Process {
+    id: allAppsReader
+
+
+    running: true
+    command: [
+        "bash",
+        "-lc",
+        "$HOME/.local/bin/precision-list-apps"
+    ]
+
+    stdout: StdioCollector {
+        onStreamFinished: {
+            try {
+                const parsed = JSON.parse(text)
+                if (Array.isArray(parsed)) {
+                    desktop.allAppItems = parsed
+                    desktop.allAppsLoaded = true
+                }
+            } catch (error) {
+                console.warn("Application list:", error)
+            }
+        }
+    }
+}
+
+                function filteredAppItems() {
             const query = searchInput.text.trim().toLowerCase()
 
             if (query.length === 0)
                 return appItems
 
-            return appItems.filter(function(item) {
-                return item.title.toLowerCase().indexOf(query) !== -1
-                    || item.subtitle.toLowerCase().indexOf(query) !== -1
-                    || item.lookup.toLowerCase().indexOf(query) !== -1
+            const matches = allAppItems.filter(function(item) {
+                const title = (item.title || "").toLowerCase()
+                const subtitle = (item.subtitle || "").toLowerCase()
+                const lookup = (item.lookup || "").toLowerCase()
+
+                return title.indexOf(query) !== -1
+                    || subtitle.indexOf(query) !== -1
+                    || lookup.indexOf(query) !== -1
             })
+
+            return matches.slice(0, 4)
         }
 
         function launchApplication(item) {
-            const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
+    if (item.action === "fedora-settings") {
+        Quickshell.execDetached({
+            command: ["__HOME__/.local/bin/precision-open-fedora-settings"]
+        })
+        root.closeLauncher()
+        root.closeDashboard()
+        return
+    }
 
-            if (desktopEntry !== null) {
-                desktopEntry.execute()
-            } else {
-                Quickshell.execDetached({
-                    command: item.fallback
-                })
-            }
+
+    if (item.action === "precision-settings") {
+        root.openSettings(0)
+        return
+    }
+            if (item.desktopFile && item.desktopFile.length > 0) {
+        Quickshell.execDetached({
+            command: ["gio", "launch", item.desktopFile]
+        })
+    } else {
+        const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
+
+        if (desktopEntry !== null) {
+            desktopEntry.execute()
+        } else {
+            Quickshell.execDetached({
+                command: item.fallback
+            })
+        }
+    }
 
             searchInput.text = ""
             searchInput.focus = false
@@ -917,6 +1210,51 @@ ShellRoot {
             viewState = 4
         }
 
+
+        function openLibraryLocation(location) {
+            let command = ""
+
+            if (location === "recent") {
+                command = "gio open recent:/// 2>/dev/null "
+                    + "|| xdg-open recent:///"
+            } else if (location === "documents") {
+                command = "folder=$(xdg-user-dir DOCUMENTS 2>/dev/null); "
+                    + "[ -n \"$folder\" ] || folder=\"$HOME/Documents\"; "
+                    + "mkdir -p \"$folder\"; xdg-open \"$folder\""
+            } else if (location === "downloads") {
+                command = "folder=$(xdg-user-dir DOWNLOAD 2>/dev/null); "
+                    + "[ -n \"$folder\" ] || folder=\"$HOME/Downloads\"; "
+                    + "mkdir -p \"$folder\"; xdg-open \"$folder\""
+            }
+
+            if (command.length === 0)
+                return
+
+            Quickshell.execDetached({
+                command: ["bash", "-lc", command]
+            })
+
+            root.closeDashboard()
+        }
+
+function showAllApplications() {
+    root.openAllApplications()
+}
+
+        function toggleDnd() {
+            if (dndBusy)
+                return
+
+            dndBusy = true
+            dndError = ""
+
+            dndWriter.exec([
+                "bash",
+                "-lc",
+                "$HOME/.local/bin/precision-dnd toggle"
+            ])
+        }
+
         Timer {
             interval: 30000
             running: true
@@ -924,25 +1262,35 @@ ShellRoot {
             onTriggered: desktop.now = new Date()
         }
 
-        Process {
-            id: batteryReader
-            command: [
-                "bash",
-                "-lc",
-                "device=$(upower -e | grep '/battery_' | head -n1); "
-                + "test -n \"$device\" && upower -i \"$device\" "
-                + "| awk '/percentage:/ {gsub(\"%\", \"\", $2); print $2; exit}'"
-            ]
+Process {
+    id: batteryReader
 
-            stdout: StdioCollector {
-                onStreamFinished: {
-                    const parsed = parseInt(text.trim())
+    command: [
+        "bash",
+        "-lc",
+        "device=$(upower -e | grep '/battery_' | head -n1); "
+        + "test -n \"$device\" && upower -i \"$device\" "
+        + "| awk "
+        + "'/percentage:/ {gsub(\"%\", \"\", $2); percentage=$2} "
+        + "/state:/ {state=$2} "
+        + "END {if (percentage != \"\") {print percentage; print state}}'"
+    ]
 
-                    if (!isNaN(parsed))
-                        desktop.batteryPercent = Math.max(0, Math.min(100, parsed))
-                }
-            }
+    stdout: StdioCollector {
+        onStreamFinished: {
+            const lines = text.replace(/\r/g, "").trim().split("\n")
+            const parsed = parseInt(lines.length > 0 ? lines[0] : "")
+            const state = lines.length > 1
+                ? lines[1].trim().toLowerCase()
+                : ""
+
+            if (!isNaN(parsed))
+                desktop.batteryPercent = Math.max(0, Math.min(100, parsed))
+
+            desktop.batteryCharging = state === "charging"
         }
+    }
+}
 
         Process {
             id: volumeReader
@@ -981,44 +1329,56 @@ ShellRoot {
             }
         }
 
-        Process {
-            id: wifiReader
-            command: [
-                "bash",
-                "-lc",
-                "export LC_ALL=C; "
-                + "radio=$(nmcli radio wifi 2>/dev/null); "
-                + "device=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null "
-                + "| awk -F: '$2 == \"wifi\" {print $1; exit}'); "
-                + "ssid=\"\"; "
-                + "if [ -n \"$device\" ]; then "
-                + "ssid=$(nmcli -g GENERAL.CONNECTION device show \"$device\" "
-                + "2>/dev/null | head -n1); "
-                + "fi; "
-                + "[ \"$ssid\" = \"--\" ] && ssid=\"\"; "
-                + "printf '%s\\n%s\\n' \"$radio\" \"$ssid\""
-            ]
+Process {
+    id: wifiReader
 
-            stdout: StdioCollector {
-                onStreamFinished: {
-                    const normalized = text.replace(/\r/g, "").trim()
-                    const lines = normalized.length > 0
-                        ? normalized.split("\n")
-                        : []
-                    const radioState = lines.length > 0
-                        ? lines[0].trim()
-                        : ""
-                    const connectionName = lines.length > 1
-                        ? lines.slice(1).join("\n").trim()
-                        : ""
+    command: [
+        "bash",
+        "-lc",
+        "export LC_ALL=C; "
+        + "radio=$(nmcli radio wifi 2>/dev/null); "
+        + "device=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null "
+        + "| awk -F: '$2 == \"wifi\" {print $1; exit}'); "
+        + "ssid=\"\"; signal=\"0\"; "
+        + "if [ -n \"$device\" ]; then "
+        + "ssid=$(nmcli -g GENERAL.CONNECTION device show \"$device\" "
+        + "2>/dev/null | head -n1); "
+        + "signal=$(nmcli -t -f IN-USE,SIGNAL device wifi list "
+        + "ifname \"$device\" --rescan no 2>/dev/null "
+        + "| awk -F: '$1 == \"*\" {print $2; exit}'); "
+        + "fi; "
+        + "[ \"$ssid\" = \"--\" ] && ssid=\"\"; "
+        + "[ -z \"$signal\" ] && signal=\"0\"; "
+        + "printf '%s\\n%s\\n%s\\n' \"$radio\" \"$ssid\" \"$signal\""
+    ]
 
-                    desktop.wifiEnabled = radioState === "enabled"
-                    desktop.wifiSsid = connectionName
-                    desktop.wifiConnected = desktop.wifiEnabled
-                        && connectionName.length > 0
-                }
-            }
+    stdout: StdioCollector {
+        onStreamFinished: {
+            const normalized = text.replace(/\r/g, "").trim()
+            const lines = normalized.length > 0
+                ? normalized.split("\n")
+                : []
+            const radioState = lines.length > 0
+                ? lines[0].trim().toLowerCase()
+                : "disabled"
+            const connectionName = lines.length > 1
+                ? lines[1].trim()
+                : ""
+            const parsedSignal = lines.length > 2
+                ? parseInt(lines[2].trim())
+                : 0
+
+            desktop.wifiEnabled = radioState === "enabled"
+            desktop.wifiSsid = connectionName
+            desktop.wifiConnected = desktop.wifiEnabled
+                && connectionName.length > 0
+            desktop.wifiSignal = desktop.wifiConnected
+                && !isNaN(parsedSignal)
+                ? Math.max(0, Math.min(100, parsedSignal))
+                : 0
         }
+    }
+}
 
         Process {
             id: wifiWriter
@@ -1332,6 +1692,44 @@ ShellRoot {
             onTriggered: {
                 if (!bluetoothReader.running)
                     bluetoothReader.running = true
+            }
+        }
+
+
+        Process {
+            id: dndReader
+
+            command: [
+                "bash",
+                "-lc",
+                "$HOME/.local/bin/precision-dnd status"
+            ]
+
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    desktop.dndEnabled =
+                        text.trim().toLowerCase() === "on"
+                }
+            }
+        }
+
+        Process {
+            id: dndWriter
+
+            stderr: StdioCollector {
+                onStreamFinished: {
+                    desktop.dndError = text.trim()
+
+                    if (desktop.dndError.length > 0)
+                        console.warn("DND control:", desktop.dndError)
+                }
+            }
+
+            onExited: function(exitCode, exitStatus) {
+                desktop.dndBusy = false
+
+                if (!dndReader.running)
+                    dndReader.running = true
             }
         }
 
@@ -1833,180 +2231,263 @@ ShellRoot {
                 }
             }
 
-            Column {
-                id: weatherBlock
+Column {
+    id: weatherBlock
 
-                anchors {
-                    right: parent.right
-                    rightMargin: desktop.s(74)
-                    top: parent.top
-                    topMargin: desktop.s(76)
+    anchors {
+        right: parent.right
+        rightMargin: desktop.s(74)
+        top: parent.top
+        topMargin: desktop.s(76)
+    }
+
+    width: desktop.s(92)
+    spacing: desktop.s(5.5)
+    visible: opacity > 0
+    opacity: root.workspaceHasWindows ? 0 : 1
+
+    Behavior on opacity {
+        NumberAnimation {
+            duration: 150
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Row {
+        width: parent.width
+        spacing: desktop.s(8)
+
+        Text {
+            width: desktop.s(23)
+            text: desktop.weatherSymbol
+            color: desktop.softInk
+            font.pixelSize: desktop.s(20)
+            horizontalAlignment: Text.AlignHCenter
+        }
+
+        Text {
+            text: isNaN(desktop.weatherTemperature)
+                ? "--°"
+                : Math.round(desktop.weatherTemperature) + "°"
+            color: desktop.softInk
+            font.family: "Inter"
+            font.pixelSize: desktop.s(21.5)
+            font.weight: Font.Light
+        }
+    }
+
+    Text {
+        width: parent.width
+        text: desktop.weatherLocation
+        color: desktop.softInk
+        font.family: "Inter"
+        font.pixelSize: desktop.s(9.3)
+        elide: Text.ElideRight
+    }
+
+    Text {
+        width: parent.width
+        text: desktop.weatherSummary
+        color: desktop.mutedInk
+        font.family: "Inter"
+        font.pixelSize: desktop.s(9.3)
+        elide: Text.ElideRight
+    }
+
+    Rectangle {
+        width: parent.width
+        height: Math.max(1, desktop.s(0.7))
+        color: "#55D8CCBC"
+    }
+
+    Text {
+        text: Qt.formatDateTime(desktop.now, "HH:mm")
+        color: desktop.softInk
+        font.family: "Inter"
+        font.pixelSize: desktop.s(21.5)
+        font.weight: Font.Light
+    }
+}
+
+Rectangle {
+    id: libraryPanel
+
+    property bool opened: desktop.viewState === 4
+        && root.desktopWidgetsVisible
+        && !root.workspaceHasWindows
+
+    anchors {
+        left: parent.left
+        leftMargin: desktop.p(26)
+        bottom: parent.bottom
+        bottomMargin: desktop.p(29)
+    }
+
+    width: desktop.p(150)
+    height: desktop.p(160)
+    radius: desktop.p(10)
+    color: desktop.panelSurface
+    border.width: Math.max(1, desktop.p(0.7))
+    border.color: desktop.panelBorder
+
+    opacity: opened ? 1 : 0
+    scale: opened ? 1 : 0.985
+    enabled: opened
+
+    Column {
+        anchors {
+            fill: parent
+            margins: desktop.p(12)
+        }
+        spacing: desktop.p(4)
+
+        Text {
+            width: parent.width
+            height: desktop.p(18)
+            text: "Apps"
+            color: desktop.graphite
+            font.family: "Inter"
+            font.pixelSize: desktop.p(9.2)
+            font.weight: Font.Medium
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Repeater {
+            model: [
+                {
+                    "title": "Atlas Portfolio",
+                    "icon": "apps.svg",
+                    "desktopFile": "/usr/share/applications/Atlas Portfolio.desktop",
+                    "lookup": "Atlas Portfolio",
+                    "fallback": ["atlas-portfolio"]
+                },
+                {
+                    "title": "darktable AI",
+                    "icon": "darktable.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/darktable-ai.desktop",
+                    "lookup": "darktable AI",
+                    "fallback": ["__HOME__/.local/bin/darktable-ai"]
+                },
+                {
+                    "title": "Precision Settings",
+                    "icon": "apps.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/precision-settings.desktop",
+                    "lookup": "Precision Settings",
+                    "fallback": ["__HOME__/.local/bin/precision-settings"]
                 }
+            ]
 
-                spacing: desktop.s(5.5)
-
-                visible: opacity > 0
-                opacity: root.workspaceHasWindows ? 0 : 1
-
-                Behavior on opacity {
-                    NumberAnimation {
-                        duration: 150
-                        easing.type: Easing.OutCubic
-                    }
-                }
-
-                Row {
-                    spacing: desktop.s(8)
-
-                    PremiumIcon {
-                        source: Qt.resolvedUrl("icons/brightness.svg")
-                        size: desktop.s(23)
-                        iconOpacity: 0.92
-                    }
-
-                    Text {
-                        text: "18°"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.s(21.5)
-                        font.weight: Font.Light
-                    }
-                }
-
-                Text {
-                    text: "Versailles"
-                    color: desktop.softInk
-                    font.family: "Inter"
-                    font.pixelSize: desktop.s(9.3)
-                }
-
-                Text {
-                    text: "Sunny"
-                    color: desktop.mutedInk
-                    font.family: "Inter"
-                    font.pixelSize: desktop.s(9.3)
-                }
+            delegate: Item {
+                required property var modelData
+                width: parent.width
+                height: desktop.p(23)
 
                 Rectangle {
-                    width: desktop.s(78)
-                    height: Math.max(1, desktop.s(0.7))
-                    color: "#55D8CCBC"
+                    x: -desktop.p(5)
+                    width: parent.width + desktop.p(10)
+                    height: parent.height
+                    radius: desktop.p(5)
+                    color: libPinnedMouse.containsMouse
+                        ? "#EEE5D9"
+                        : "transparent"
+                }
+
+                PremiumIcon {
+                    id: libPinnedIcon
+                    anchors {
+                        left: parent.left
+                        leftMargin: desktop.p(1)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    source: Qt.resolvedUrl("icons/" + modelData.icon)
+                    size: desktop.p(12)
+                    iconOpacity: 0.82
                 }
 
                 Text {
-                    text: Qt.formatDateTime(desktop.now, "HH:mm")
-                    color: desktop.softInk
-                    font.family: "Inter"
-                    font.pixelSize: desktop.s(21.5)
-                    font.weight: Font.Light
-                }
-            }
-
-            Rectangle {
-                id: libraryPanel
-
-                property bool opened: desktop.viewState === 4 && root.desktopWidgetsVisible && !root.workspaceHasWindows
-
-                anchors {
-                    left: parent.left
-                    leftMargin: desktop.p(26)
-                    bottom: parent.bottom
-                    bottomMargin: desktop.p(29)
-                }
-
-                width: desktop.p(146)
-                height: desktop.p(160)
-                radius: desktop.p(10)
-
-                color: desktop.panelSurface
-                border.width: Math.max(1, desktop.p(0.7))
-                border.color: desktop.panelBorder
-
-                opacity: opened ? 1 : 0
-                scale: opened ? 1 : 0.985
-                enabled: opened
-
-                Behavior on opacity {
-                    NumberAnimation {
-                        duration: 170
-                        easing.type: Easing.OutCubic
-                    }
-                }
-
-                Behavior on scale {
-                    NumberAnimation {
-                        duration: 170
-                        easing.type: Easing.OutCubic
-                    }
-                }
-
-                Column {
                     anchors {
-                        fill: parent
-                        margins: desktop.p(15)
+                        left: libPinnedIcon.right
+                        leftMargin: desktop.p(7)
+                        right: parent.right
+                        verticalCenter: parent.verticalCenter
                     }
+                    text: modelData.title
+                    color: libPinnedMouse.containsMouse
+                        ? desktop.graphite
+                        : desktop.softInk
+                    font.family: "Inter"
+                    font.pixelSize: desktop.p(8.5)
+                    elide: Text.ElideRight
+                }
 
-                    spacing: desktop.p(11)
-
-                    Text {
-                        text: "Apps"
-                        color: desktop.graphite
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(9)
-                        font.weight: Font.Medium
-                    }
-
-                    Text {
-                        text: "Recent"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8)
-                    }
-
-                    Text {
-                        text: "Documents"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8)
-                    }
-
-                    Text {
-                        text: "Downloads"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8)
-                    }
-
-                    Item {
-                        width: 1
-                        height: desktop.p(4)
-                    }
-
-                    Rectangle {
-                        width: parent.width
-                        height: Math.max(1, desktop.p(0.7))
-                        color: "#50D8CCBC"
-                    }
-
-                    Row {
-                        width: parent.width
-
-                        Text {
-                            width: parent.width - desktop.p(20)
-                            text: "Show All"
-                            color: desktop.softInk
-                            font.family: "Inter"
-                            font.pixelSize: desktop.p(8)
-                        }
-
-                        PremiumIcon {
-                            source: Qt.resolvedUrl("icons/expand.svg")
-                            size: desktop.p(12)
-                            iconOpacity: 0.85
-                        }
-                    }
+                MouseArea {
+                    id: libPinnedMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: desktop.launchPinnedApplication(
+                        modelData.desktopFile,
+                        modelData.lookup,
+                        modelData.fallback
+                    )
                 }
             }
+        }
+
+        Item { width: 1; height: desktop.p(1) }
+
+        Rectangle {
+            width: parent.width
+            height: Math.max(1, desktop.p(0.7))
+            color: "#50D8CCBC"
+        }
+
+Item {
+    id: libShowAllRow
+    width: parent.width
+    height: desktop.p(23)
+
+    Rectangle {
+        anchors.fill: parent
+        radius: desktop.p(5.5)
+        color: libShowAllMouse.containsMouse ? "#EEE5D9" : "transparent"
+        border.width: libShowAllMouse.containsMouse ? Math.max(1, desktop.p(0.55)) : 0
+        border.color: "#55CFC4B6"
+    }
+
+    Text {
+        anchors {
+            left: parent.left
+            leftMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
+        text: "Show All"
+        color: libShowAllMouse.containsMouse ? desktop.graphite : desktop.softInk
+        font.family: "Inter"
+        font.pixelSize: desktop.p(8.5)
+    }
+
+    PremiumIcon {
+        anchors {
+            right: parent.right
+            rightMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
+        source: Qt.resolvedUrl("icons/expand.svg")
+        size: desktop.p(10.5)
+        iconOpacity: 0.78
+    }
+
+    MouseArea {
+        id: libShowAllMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: desktop.showAllApplications()
+    }
+}
+    }
+}
 
             Rectangle {
                 id: commandPalette
@@ -2070,6 +2551,14 @@ ShellRoot {
                     TextField {
                         id: searchInput
 
+
+                        onTextChanged: {
+                            if (text.trim().length > 0
+                                    && !desktop.allAppsLoaded
+                                    && !allAppsReader.running) {
+                                allAppsReader.running = true
+                            }
+                        }
                         anchors {
                             left: parent.left
                             leftMargin: desktop.p(38)
@@ -2243,9 +2732,16 @@ ShellRoot {
                     bottomMargin: desktop.p(29)
                 }
 
-                width: desktop.p(160)
-                height: desktop.p(168)
+                width: desktop.p(174)
+                height: desktop.p(154) + (desktopMediaRow.visible ? desktop.p(45) : 0) + desktopSessionRow.height + desktop.p(9)
                 radius: desktop.p(10)
+
+                Behavior on height {
+                    NumberAnimation {
+                        duration: 170
+                        easing.type: Easing.OutCubic
+                    }
+                }
 
                 color: desktop.panelSurface
                 border.width: Math.max(1, desktop.p(0.65))
@@ -2272,27 +2768,27 @@ ShellRoot {
                 Column {
                     anchors {
                         fill: parent
-                        margins: desktop.p(12)
+                        margins: desktop.p(11)
                     }
 
-                    spacing: desktop.p(7)
+                    spacing: desktop.p(6)
 
                     Item {
                         width: parent.width
                         height: desktop.p(15)
 
-                        PremiumIcon {
-                            id: wifiRowIcon
+PremiumIcon {
+    id: wifiRowIcon
 
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
 
-                            source: Qt.resolvedUrl("icons/wifi.svg")
-                            size: desktop.p(12)
-                            iconOpacity: desktop.wifiEnabled ? 0.88 : 0.40
-                        }
+    source: Qt.resolvedUrl("icons/wifi.svg")
+    size: desktop.p(13)
+    iconOpacity: desktop.wifiEnabled ? 0.88 : 0.40
+}
 
                         Text {
                             anchors {
@@ -2301,13 +2797,13 @@ ShellRoot {
                                 verticalCenter: parent.verticalCenter
                             }
 
-                            width: desktop.p(42)
+                            width: desktop.p(44)
                             text: "Wi-Fi"
                             color: desktop.wifiEnabled
                                 ? desktop.graphite
                                 : desktop.softInk
                             font.family: "Inter"
-                            font.pixelSize: desktop.p(8.2)
+                            font.pixelSize: desktop.p(8.8)
                         }
 
                         Rectangle {
@@ -2354,7 +2850,7 @@ ShellRoot {
                                 verticalCenter: parent.verticalCenter
                             }
 
-                            width: desktop.p(38)
+                            width: desktop.p(40)
                             text: desktop.wifiBusy
                                 ? "..."
                                 : (!desktop.wifiEnabled
@@ -2365,7 +2861,7 @@ ShellRoot {
                             horizontalAlignment: Text.AlignRight
                             color: desktop.mutedInk
                             font.family: "Inter"
-                            font.pixelSize: desktop.p(7.2)
+                            font.pixelSize: desktop.p(7.7)
                             elide: Text.ElideRight
                         }
 
@@ -2396,18 +2892,18 @@ ShellRoot {
                         width: parent.width
                         height: desktop.p(15)
 
-                        PremiumIcon {
-                            id: bluetoothRowIcon
+PremiumIcon {
+    id: bluetoothRowIcon
 
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
 
-                            source: Qt.resolvedUrl("icons/bluetooth.svg")
-                            size: desktop.p(12)
-                            iconOpacity: desktop.bluetoothEnabled ? 0.88 : 0.40
-                        }
+    source: Qt.resolvedUrl("icons/bluetooth.svg")
+    size: desktop.p(13)
+    iconOpacity: desktop.bluetoothEnabled ? 0.88 : 0.40
+}
 
                         Text {
                             anchors {
@@ -2422,7 +2918,7 @@ ShellRoot {
                                 ? desktop.graphite
                                 : desktop.softInk
                             font.family: "Inter"
-                            font.pixelSize: desktop.p(8.2)
+                            font.pixelSize: desktop.p(8.8)
                             elide: Text.ElideRight
                         }
 
@@ -2469,7 +2965,7 @@ ShellRoot {
                                 verticalCenter: parent.verticalCenter
                             }
 
-                            width: desktop.p(38)
+                            width: desktop.p(40)
                             text: desktop.bluetoothBusy
                                 ? "..."
                                 : (!desktop.bluetoothEnabled
@@ -2480,7 +2976,7 @@ ShellRoot {
                             horizontalAlignment: Text.AlignRight
                             color: desktop.mutedInk
                             font.family: "Inter"
-                            font.pixelSize: desktop.p(7.2)
+                            font.pixelSize: desktop.p(7.7)
                             elide: Text.ElideRight
                         }
 
@@ -2507,74 +3003,103 @@ ShellRoot {
                         }
                     }
 
-                    Item {
-                        width: parent.width
-                        height: desktop.p(15)
+Item {
+    id: dndRow
 
-                        PremiumIcon {
-                            id: dndRowIcon
+    width: parent.width
+    height: desktop.p(15)
 
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
+    PremiumIcon {
+        id: dndRowIcon
 
-                            source: Qt.resolvedUrl("icons/moon.svg")
-                            size: desktop.p(12)
-                            iconOpacity: 0.88
-                        }
+        anchors {
+            left: parent.left
+            verticalCenter: parent.verticalCenter
+        }
 
-                        Text {
-                            anchors {
-                                left: dndRowIcon.right
-                                leftMargin: desktop.p(7)
-                                verticalCenter: parent.verticalCenter
-                            }
+        source: Qt.resolvedUrl("icons/moon.svg")
+        size: desktop.p(13)
+        iconOpacity: desktop.dndEnabled ? 0.96 : 0.58
+    }
 
-                            width: desktop.p(72)
-                            text: "Do Not Disturb"
-                            color: desktop.softInk
-                            font.family: "Inter"
-                            font.pixelSize: desktop.p(8.2)
-                            elide: Text.ElideRight
-                        }
+    Text {
+        anchors {
+            left: dndRowIcon.right
+            leftMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
 
-                        Rectangle {
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
+        width: desktop.p(72)
+        text: "Do Not Disturb"
+        color: desktop.dndEnabled
+            ? desktop.graphite
+            : desktop.softInk
+        font.family: "Inter"
+        font.pixelSize: desktop.p(8.5)
+        elide: Text.ElideRight
+    }
 
-                            width: desktop.p(20)
-                            height: desktop.p(11)
-                            radius: height / 2
-                            color: "#B9B1A8"
+    Rectangle {
+        id: dndSwitch
 
-                            Rectangle {
-                                width: desktop.p(7)
-                                height: desktop.p(7)
-                                radius: width / 2
-                                color: desktop.warmWhite
-                                anchors.verticalCenter: parent.verticalCenter
-                                x: desktop.p(2)
-                            }
-                        }
+        anchors {
+            right: parent.right
+            verticalCenter: parent.verticalCenter
+        }
 
-                        Text {
-                            anchors {
-                                right: parent.right
-                                rightMargin: desktop.p(27)
-                                verticalCenter: parent.verticalCenter
-                            }
+        width: desktop.p(20)
+        height: desktop.p(11)
+        radius: height / 2
+        color: desktop.dndEnabled
+            ? desktop.softInk
+            : "#B9B1A8"
+        opacity: desktop.dndBusy ? 0.58 : 1
 
-                            width: desktop.p(28)
-                            text: "Off"
-                            horizontalAlignment: Text.AlignRight
-                            color: desktop.mutedInk
-                            font.family: "Inter"
-                            font.pixelSize: desktop.p(7.2)
-                        }
-                    }
+        Rectangle {
+            width: desktop.p(7)
+            height: desktop.p(7)
+            radius: width / 2
+            color: desktop.warmWhite
+            anchors.verticalCenter: parent.verticalCenter
+
+            x: desktop.dndEnabled
+                ? parent.width - width - desktop.p(2)
+                : desktop.p(2)
+
+            Behavior on x {
+                NumberAnimation {
+                    duration: 110
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+    }
+
+    Text {
+        anchors {
+            right: dndSwitch.left
+            rightMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
+
+        width: desktop.p(28)
+        text: desktop.dndBusy
+            ? "..."
+            : (desktop.dndEnabled ? "On" : "Off")
+        horizontalAlignment: Text.AlignRight
+        color: desktop.mutedInk
+        font.family: "Inter"
+        font.pixelSize: desktop.p(8.5)
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        enabled: !desktop.dndBusy
+        onClicked: desktop.toggleDnd()
+    }
+}
 
                     Rectangle {
                         width: parent.width
@@ -2586,18 +3111,18 @@ ShellRoot {
                         width: parent.width
                         height: desktop.p(15)
 
-                        PremiumIcon {
-                            id: batteryRowIcon
+PremiumIcon {
+    id: batteryRowIcon
 
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
 
-                            source: Qt.resolvedUrl("icons/battery.svg")
-                            size: desktop.p(12)
-                            iconOpacity: 0.88
-                        }
+    source: Qt.resolvedUrl("icons/battery.svg")
+    size: desktop.p(13)
+    iconOpacity: 0.88
+}
 
                         Text {
                             anchors {
@@ -2609,7 +3134,7 @@ ShellRoot {
                             text: "Battery"
                             color: desktop.softInk
                             font.family: "Inter"
-                            font.pixelSize: desktop.p(8.2)
+                            font.pixelSize: desktop.p(8.8)
                         }
 
                         Text {
@@ -2621,7 +3146,7 @@ ShellRoot {
                             text: desktop.batteryPercent + "%"
                             color: desktop.mutedInk
                             font.family: "Inter"
-                            font.pixelSize: desktop.p(7.2)
+                            font.pixelSize: desktop.p(7.7)
                             font.weight: Font.Normal
                         }
                     }
@@ -2630,27 +3155,27 @@ ShellRoot {
                         width: parent.width
                         height: desktop.p(16)
 
-                        PremiumIcon {
-                            id: volumeLeft
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
-                            source: Qt.resolvedUrl("icons/volume.svg")
-                            size: desktop.p(12)
-                            iconOpacity: 0.84
-                        }
+PremiumIcon {
+    id: volumeLeft
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/volume.svg")
+    size: desktop.p(13)
+    iconOpacity: 0.84
+}
 
-                        PremiumIcon {
-                            id: volumeRight
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                            source: Qt.resolvedUrl("icons/volume.svg")
-                            size: desktop.p(10)
-                            iconOpacity: 0.74
-                        }
+PremiumIcon {
+    id: volumeRight
+    anchors {
+        right: parent.right
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/volume.svg")
+    size: desktop.p(11)
+    iconOpacity: 0.74
+}
 
                         Slider {
                             id: volumeSlider
@@ -2721,27 +3246,27 @@ ShellRoot {
                         width: parent.width
                         height: desktop.p(16)
 
-                        PremiumIcon {
-                            id: brightnessLeft
-                            anchors {
-                                left: parent.left
-                                verticalCenter: parent.verticalCenter
-                            }
-                            source: Qt.resolvedUrl("icons/brightness.svg")
-                            size: desktop.p(12)
-                            iconOpacity: 0.84
-                        }
+PremiumIcon {
+    id: brightnessLeft
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/brightness.svg")
+    size: desktop.p(13)
+    iconOpacity: 0.84
+}
 
-                        PremiumIcon {
-                            id: brightnessRight
-                            anchors {
-                                right: parent.right
-                                verticalCenter: parent.verticalCenter
-                            }
-                            source: Qt.resolvedUrl("icons/brightness.svg")
-                            size: desktop.p(10)
-                            iconOpacity: 0.74
-                        }
+PremiumIcon {
+    id: brightnessRight
+    anchors {
+        right: parent.right
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/brightness.svg")
+    size: desktop.p(11)
+    iconOpacity: 0.74
+}
 
                         Slider {
                             id: brightnessSlider
@@ -2807,6 +3332,40 @@ ShellRoot {
                             }
                         }
                     }
+
+Rectangle {
+    id: desktopMediaRowSeparator
+    width: parent.width
+    height: Math.max(1, desktop.p(0.65))
+    color: "#52D8CCBC"
+    visible: desktopMediaRow.visible
+}
+
+PrecisionMediaRow {
+    id: desktopMediaRow
+    width: parent.width
+    unit: desktop.p(1)
+    graphite: desktop.graphite
+    softInk: desktop.softInk
+    mutedInk: desktop.mutedInk
+}
+
+Rectangle {
+    id: desktopSessionRowSeparator
+    width: parent.width
+    height: Math.max(1, desktop.p(0.65))
+    color: "#52D8CCBC"
+}
+
+PrecisionSessionRow {
+    id: desktopSessionRow
+    width: parent.width
+    unit: desktop.p(1)
+    graphite: desktop.graphite
+    softInk: desktop.softInk
+    mutedInk: desktop.mutedInk
+    helperPath: "__HOME__/.local/bin/precision-session-action"
+}
                 }
             }
 
@@ -3416,22 +3975,42 @@ ShellRoot {
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
         WlrLayershell.namespace: "precision-shell-dashboard"
 
-        color: "#3017130F"
-
+        color: Qt.rgba(0, 0, 0, root.overlayDarkness)
         function filteredItems() {
             const query = dashboardSearch.text.trim().toLowerCase()
+            const baseItems = query.length > 0 ? desktop.allAppItems : desktop.appItems
 
             if (query.length === 0)
-                return desktop.appItems
+                return baseItems
 
-            return desktop.appItems.filter(function(item) {
-                return item.title.toLowerCase().indexOf(query) !== -1
-                    || item.subtitle.toLowerCase().indexOf(query) !== -1
-                    || item.lookup.toLowerCase().indexOf(query) !== -1
+            const matches = baseItems.filter(function(item) {
+                const title = (item.title || "").toLowerCase()
+                const subtitle = (item.subtitle || "").toLowerCase()
+                const lookup = (item.lookup || "").toLowerCase()
+
+                return title.indexOf(query) !== -1
+                    || subtitle.indexOf(query) !== -1
+                    || lookup.indexOf(query) !== -1
             })
+
+            return matches.slice(0, 4)
         }
 
         function launchItem(item) {
+    if (item.action === "fedora-settings") {
+        Quickshell.execDetached({
+            command: ["__HOME__/.local/bin/precision-open-fedora-settings"]
+        })
+        root.closeLauncher()
+        root.closeDashboard()
+        return
+    }
+
+
+    if (item.action === "precision-settings") {
+        root.openSettings(0)
+        return
+    }
             const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
 
             if (desktopEntry !== null) {
@@ -3457,102 +4036,267 @@ ShellRoot {
             onClicked: root.closeDashboard()
         }
 
+
+
+
+
+Rectangle {
+    id: dashboardWeatherCard
+
+    anchors {
+        right: parent.right
+        rightMargin: desktop.s(48)
+        top: parent.top
+        topMargin: desktop.s(49)
+    }
+
+    width: desktop.s(136)
+    height: desktop.s(150)
+    radius: desktop.s(14)
+    z: 1
+    color: "#FFFBF8F3"
+    border.width: Math.max(1, desktop.s(0.9))
+    border.color: "#B0CFC4B6"
+
+    Column {
+        id: dashboardWeatherBlock
+        anchors {
+            fill: parent
+            leftMargin: desktop.s(20)
+            rightMargin: desktop.s(20)
+            topMargin: desktop.s(17)
+            bottomMargin: desktop.s(17)
+        }
+        spacing: desktop.s(5.5)
+
+        Row {
+            width: parent.width
+            spacing: desktop.s(8)
+
+            Text {
+                width: desktop.s(23)
+                text: desktop.weatherSymbol
+                color: desktop.softInk
+                font.pixelSize: desktop.s(20)
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            Text {
+                text: isNaN(desktop.weatherTemperature)
+                    ? "--°"
+                    : Math.round(desktop.weatherTemperature) + "°"
+                color: desktop.softInk
+                font.family: "Inter"
+                font.pixelSize: desktop.s(21.5)
+                font.weight: Font.Light
+            }
+        }
+
+        Text {
+            width: parent.width
+            text: desktop.weatherLocation
+            color: desktop.softInk
+            font.family: "Inter"
+            font.pixelSize: desktop.s(9.3)
+            elide: Text.ElideRight
+        }
+
+        Text {
+            width: parent.width
+            text: desktop.weatherSummary
+            color: desktop.mutedInk
+            font.family: "Inter"
+            font.pixelSize: desktop.s(9.3)
+            elide: Text.ElideRight
+        }
+
         Rectangle {
-            id: dashboardLibrary
+            width: parent.width
+            height: Math.max(1, desktop.s(0.7))
+            color: "#55D8CCBC"
+        }
 
-            anchors {
-                left: parent.left
-                leftMargin: desktop.p(26)
-                bottom: parent.bottom
-                bottomMargin: desktop.p(29)
-            }
+        Text {
+            text: Qt.formatDateTime(desktop.now, "HH:mm")
+            color: desktop.softInk
+            font.family: "Inter"
+            font.pixelSize: desktop.s(21.5)
+            font.weight: Font.Light
+        }
+    }
+}
 
-            width: desktop.p(146)
-            height: desktop.p(160)
-            radius: desktop.p(10)
+Rectangle {
+    id: dashboardLibrary
 
-            color: "#F5FBF9F5"
-            border.width: Math.max(1, desktop.p(0.65))
-            border.color: "#72CFC4B6"
+    anchors {
+        left: parent.left
+        leftMargin: desktop.p(26)
+        bottom: parent.bottom
+        bottomMargin: desktop.p(29)
+    }
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.AllButtons
-                propagateComposedEvents: false
-                onPressed: function(mouse) {
-                    mouse.accepted = true
+    width: desktop.p(150)
+    height: desktop.p(160)
+    radius: desktop.p(10)
+    color: desktop.panelSurface
+    border.width: Math.max(1, desktop.p(0.7))
+    border.color: desktop.panelBorder
+
+    Column {
+        anchors {
+            fill: parent
+            margins: desktop.p(12)
+        }
+        spacing: desktop.p(4)
+
+        Text {
+            width: parent.width
+            height: desktop.p(18)
+            text: "Apps"
+            color: desktop.graphite
+            font.family: "Inter"
+            font.pixelSize: desktop.p(9.2)
+            font.weight: Font.Medium
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        Repeater {
+            model: [
+                {
+                    "title": "Atlas Portfolio",
+                    "icon": "apps.svg",
+                    "desktopFile": "/usr/share/applications/Atlas Portfolio.desktop",
+                    "lookup": "Atlas Portfolio",
+                    "fallback": ["atlas-portfolio"]
+                },
+                {
+                    "title": "darktable AI",
+                    "icon": "darktable.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/darktable-ai.desktop",
+                    "lookup": "darktable AI",
+                    "fallback": ["__HOME__/.local/bin/darktable-ai"]
+                },
+                {
+                    "title": "Precision Settings",
+                    "icon": "apps.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/precision-settings.desktop",
+                    "lookup": "Precision Settings",
+                    "fallback": ["__HOME__/.local/bin/precision-settings"]
                 }
-            }
+            ]
 
-            Column {
-                anchors {
-                    fill: parent
-                    margins: desktop.p(14)
-                }
-
-                spacing: desktop.p(11)
-
-                Text {
-                    text: "Apps"
-                    color: desktop.graphite
-                    font.family: "Inter"
-                    font.pixelSize: desktop.p(9.0)
-                    font.weight: Font.Medium
-                }
-
-                Repeater {
-                    model: ["Recent", "Documents", "Downloads"]
-
-                    delegate: Text {
-                        required property string modelData
-
-                        text: modelData
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(7.9)
-                    }
-                }
-
-                Item {
-                    width: 1
-                    height: desktop.p(4)
-                }
+            delegate: Item {
+                required property var modelData
+                width: parent.width
+                height: desktop.p(23)
 
                 Rectangle {
-                    width: parent.width
-                    height: Math.max(1, desktop.p(0.65))
-                    color: "#52D8CCBC"
+                    x: -desktop.p(5)
+                    width: parent.width + desktop.p(10)
+                    height: parent.height
+                    radius: desktop.p(5)
+                    color: dashLibPinnedMouse.containsMouse
+                        ? "#EEE5D9"
+                        : "transparent"
                 }
 
-                Item {
-                    width: parent.width
-                    height: desktop.p(14)
-
-                    Text {
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        text: "Show All"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(7.5)
+                PremiumIcon {
+                    id: dashLibPinnedIcon
+                    anchors {
+                        left: parent.left
+                        leftMargin: desktop.p(1)
+                        verticalCenter: parent.verticalCenter
                     }
+                    source: Qt.resolvedUrl("icons/" + modelData.icon)
+                    size: desktop.p(12)
+                    iconOpacity: 0.82
+                }
 
-                    PremiumIcon {
-                        anchors {
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        source: Qt.resolvedUrl("icons/expand.svg")
-                        size: desktop.p(9)
-                        iconOpacity: 0.72
+                Text {
+                    anchors {
+                        left: dashLibPinnedIcon.right
+                        leftMargin: desktop.p(7)
+                        right: parent.right
+                        verticalCenter: parent.verticalCenter
                     }
+                    text: modelData.title
+                    color: dashLibPinnedMouse.containsMouse
+                        ? desktop.graphite
+                        : desktop.softInk
+                    font.family: "Inter"
+                    font.pixelSize: desktop.p(8.5)
+                    elide: Text.ElideRight
+                }
+
+                MouseArea {
+                    id: dashLibPinnedMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: desktop.launchPinnedApplication(
+                        modelData.desktopFile,
+                        modelData.lookup,
+                        modelData.fallback
+                    )
                 }
             }
         }
+
+        Item { width: 1; height: desktop.p(1) }
+
+        Rectangle {
+            width: parent.width
+            height: Math.max(1, desktop.p(0.7))
+            color: "#50D8CCBC"
+        }
+
+Item {
+    id: dashLibShowAllRow
+    width: parent.width
+    height: desktop.p(23)
+
+    Rectangle {
+        anchors.fill: parent
+        radius: desktop.p(5.5)
+        color: dashLibShowAllMouse.containsMouse ? "#EEE5D9" : "transparent"
+        border.width: dashLibShowAllMouse.containsMouse ? Math.max(1, desktop.p(0.55)) : 0
+        border.color: "#55CFC4B6"
+    }
+
+    Text {
+        anchors {
+            left: parent.left
+            leftMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
+        text: "Show All"
+        color: dashLibShowAllMouse.containsMouse ? desktop.graphite : desktop.softInk
+        font.family: "Inter"
+        font.pixelSize: desktop.p(8.5)
+    }
+
+    PremiumIcon {
+        anchors {
+            right: parent.right
+            rightMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
+        source: Qt.resolvedUrl("icons/expand.svg")
+        size: desktop.p(10.5)
+        iconOpacity: 0.78
+    }
+
+    MouseArea {
+        id: dashLibShowAllMouse
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: desktop.showAllApplications()
+    }
+}
+    }
+}
 
         Rectangle {
             id: dashboardPalette
@@ -3567,9 +4311,9 @@ ShellRoot {
             height: desktop.p(123)
             radius: desktop.p(10)
 
-            color: "#F5FBF9F5"
+            color: desktop.panelSurface
             border.width: Math.max(1, desktop.p(0.7))
-            border.color: "#72CFC4B6"
+            border.color: desktop.panelBorder
             clip: true
 
             MouseArea {
@@ -3604,6 +4348,13 @@ ShellRoot {
 
                 TextField {
                     id: dashboardSearch
+                    onTextChanged: {
+                        if (text.trim().length > 0
+                                && !desktop.allAppsLoaded
+                                && !allAppsReader.running) {
+                            allAppsReader.running = true
+                        }
+                    }
 
                     anchors {
                         left: parent.left
@@ -3651,7 +4402,7 @@ ShellRoot {
                         verticalCenter: parent.verticalCenter
                     }
 
-                    text: "SUPER  D"
+                    text: "SUPER D"
                     color: "#A89F96"
                     font.family: "Inter"
                     font.pixelSize: desktop.p(6.1)
@@ -3752,479 +4503,973 @@ ShellRoot {
             }
         }
 
-        Rectangle {
-            id: dashboardSettings
+            Rectangle {
+                id: dashboardSettings
 
-            anchors {
-                right: parent.right
-                rightMargin: desktop.p(26)
-                bottom: parent.bottom
-                bottomMargin: desktop.p(29)
-            }
+                property bool opened: true
 
-            width: desktop.p(160)
-            height: desktop.p(190)
-            radius: desktop.p(10)
-
-            color: "#F5FBF9F5"
-            border.width: Math.max(1, desktop.p(0.65))
-            border.color: "#72CFC4B6"
-
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.AllButtons
-                propagateComposedEvents: false
-                onPressed: function(mouse) {
-                    mouse.accepted = true
-                }
-            }
-
-            Column {
                 anchors {
-                    fill: parent
-                    margins: desktop.p(12)
+                    right: parent.right
+                    rightMargin: desktop.p(26)
+                    bottom: parent.bottom
+                    bottomMargin: desktop.p(29)
                 }
 
-                spacing: desktop.p(7)
+                width: desktop.p(174)
+                height: desktop.p(154) + (dashboardMediaRow.visible ? desktop.p(45) : 0) + dashboardSessionRow.height + desktop.p(9)
+                radius: desktop.p(10)
 
-                Item {
-                    width: parent.width
-                    height: desktop.p(15)
+                Behavior on height {
+                    NumberAnimation {
+                        duration: 170
+                        easing.type: Easing.OutCubic
+                    }
+                }
 
-                    PremiumIcon {
-                        id: dashboardWifiIcon
+                color: desktop.panelSurface
+                border.width: Math.max(1, desktop.p(0.65))
+                border.color: desktop.panelBorder
 
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                        }
+                opacity: 1
+                scale: 1
+                enabled: true
 
-                        source: Qt.resolvedUrl("icons/wifi.svg")
-                        size: desktop.p(12)
-                        iconOpacity: desktop.wifiEnabled ? 0.88 : 0.40
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 180
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Column {
+                    anchors {
+                        fill: parent
+                        margins: desktop.p(11)
                     }
 
-                    Text {
-                        anchors {
-                            left: dashboardWifiIcon.right
-                            leftMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
+                    spacing: desktop.p(6)
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+PremiumIcon {
+    id: dashMirrorWifiRowIcon
+
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+
+    source: Qt.resolvedUrl("icons/wifi.svg")
+    size: desktop.p(13)
+    iconOpacity: desktop.wifiEnabled ? 0.88 : 0.40
+}
+
+                        Text {
+                            anchors {
+                                left: dashMirrorWifiRowIcon.right
+                                leftMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(44)
+                            text: "Wi-Fi"
+                            color: desktop.wifiEnabled
+                                ? desktop.graphite
+                                : desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(8.8)
                         }
-
-                        text: "Wi-Fi"
-                        color: desktop.wifiEnabled
-                            ? desktop.graphite
-                            : desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8.2)
-                    }
-
-                    Text {
-                        anchors {
-                            right: dashboardWifiSwitch.left
-                            rightMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        width: desktop.p(38)
-                        text: desktop.wifiBusy
-                            ? "..."
-                            : (!desktop.wifiEnabled
-                                ? "Off"
-                                : (desktop.wifiConnected
-                                    ? desktop.wifiSsid
-                                    : "On"))
-                        horizontalAlignment: Text.AlignRight
-                        color: desktop.mutedInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(7.2)
-                        elide: Text.ElideRight
-                    }
-
-                    Rectangle {
-                        id: dashboardWifiSwitch
-
-                        anchors {
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        width: desktop.p(20)
-                        height: desktop.p(11)
-                        radius: height / 2
-                        color: desktop.wifiEnabled
-                            ? desktop.softInk
-                            : "#B9B1A8"
 
                         Rectangle {
-                            width: desktop.p(7)
-                            height: desktop.p(7)
-                            radius: width / 2
-                            color: desktop.warmWhite
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: desktop.wifiEnabled
-                                ? parent.width - width - desktop.p(2)
-                                : desktop.p(2)
+                            id: dashMirrorWifiToggle
+
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(20)
+                            height: desktop.p(11)
+                            radius: height / 2
+                            color: desktop.wifiEnabled
+                                ? desktop.softInk
+                                : "#B9B1A8"
+                            opacity: desktop.wifiBusy ? 0.58 : 1
+
+                            Rectangle {
+                                width: desktop.p(7)
+                                height: desktop.p(7)
+                                radius: width / 2
+                                color: desktop.warmWhite
+
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                x: desktop.wifiEnabled
+                                    ? parent.width - width - desktop.p(2)
+                                    : desktop.p(2)
+
+                                Behavior on x {
+                                    NumberAnimation {
+                                        duration: 110
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors {
+                                right: dashMirrorWifiToggle.left
+                                rightMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(40)
+                            text: desktop.wifiBusy
+                                ? "..."
+                                : (!desktop.wifiEnabled
+                                    ? "Off"
+                                    : (desktop.wifiConnected
+                                        ? desktop.wifiSsid
+                                        : "On"))
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.7)
+                            elide: Text.ElideRight
                         }
 
                         MouseArea {
-                            anchors.fill: parent
+                            anchors {
+                                left: parent.left
+                                top: parent.top
+                                bottom: parent.bottom
+                                right: dashMirrorWifiToggle.left
+                                rightMargin: desktop.p(5)
+                            }
+
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.dashboardWifiMenuOpen =
+                                    !root.dashboardWifiMenuOpen
+
+                                if (root.dashboardWifiMenuOpen
+                                        && desktop.wifiEnabled) {
+                                    desktop.scanWifi()
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: dashMirrorWifiToggle
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             enabled: !desktop.wifiBusy
                             onClicked: desktop.toggleWifi()
                         }
                     }
-                }
 
-                Item {
-                    width: parent.width
-                    height: desktop.p(15)
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
 
-                    PremiumIcon {
-                        id: dashboardBluetoothIcon
+PremiumIcon {
+    id: dashMirrorBluetoothRowIcon
 
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+
+    source: Qt.resolvedUrl("icons/bluetooth.svg")
+    size: desktop.p(13)
+    iconOpacity: desktop.bluetoothEnabled ? 0.88 : 0.40
+}
+
+                        Text {
+                            anchors {
+                                left: dashMirrorBluetoothRowIcon.right
+                                leftMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(62)
+                            text: "Bluetooth"
+                            color: desktop.bluetoothEnabled
+                                ? desktop.graphite
+                                : desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(8.8)
+                            elide: Text.ElideRight
                         }
-
-                        source: Qt.resolvedUrl("icons/bluetooth.svg")
-                        size: desktop.p(12)
-                        iconOpacity: desktop.bluetoothEnabled ? 0.88 : 0.40
-                    }
-
-                    Text {
-                        anchors {
-                            left: dashboardBluetoothIcon.right
-                            leftMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        text: "Bluetooth"
-                        color: desktop.bluetoothEnabled
-                            ? desktop.graphite
-                            : desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8.2)
-                    }
-
-                    Text {
-                        anchors {
-                            right: dashboardBluetoothSwitch.left
-                            rightMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        width: desktop.p(38)
-                        text: desktop.bluetoothBusy
-                            ? "..."
-                            : (!desktop.bluetoothEnabled
-                                ? "Off"
-                                : (desktop.bluetoothConnectedName.length > 0
-                                    ? desktop.bluetoothConnectedName
-                                    : "On"))
-                        horizontalAlignment: Text.AlignRight
-                        color: desktop.mutedInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(7.2)
-                        elide: Text.ElideRight
-                    }
-
-                    Rectangle {
-                        id: dashboardBluetoothSwitch
-
-                        anchors {
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        width: desktop.p(20)
-                        height: desktop.p(11)
-                        radius: height / 2
-                        color: desktop.bluetoothEnabled
-                            ? desktop.softInk
-                            : "#B9B1A8"
 
                         Rectangle {
-                            width: desktop.p(7)
-                            height: desktop.p(7)
-                            radius: width / 2
-                            color: desktop.warmWhite
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: desktop.bluetoothEnabled
-                                ? parent.width - width - desktop.p(2)
-                                : desktop.p(2)
+                            id: dashMirrorBluetoothToggle
+
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(20)
+                            height: desktop.p(11)
+                            radius: height / 2
+                            color: desktop.bluetoothEnabled
+                                ? desktop.softInk
+                                : "#B9B1A8"
+                            opacity: desktop.bluetoothBusy ? 0.58 : 1
+
+                            Rectangle {
+                                width: desktop.p(7)
+                                height: desktop.p(7)
+                                radius: width / 2
+                                color: desktop.warmWhite
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                x: desktop.bluetoothEnabled
+                                    ? parent.width - width - desktop.p(2)
+                                    : desktop.p(2)
+
+                                Behavior on x {
+                                    NumberAnimation {
+                                        duration: 110
+                                        easing.type: Easing.OutCubic
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            anchors {
+                                right: dashMirrorBluetoothToggle.left
+                                rightMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            width: desktop.p(40)
+                            text: desktop.bluetoothBusy
+                                ? "..."
+                                : (!desktop.bluetoothEnabled
+                                    ? "Off"
+                                    : (desktop.bluetoothConnectedName.length > 0
+                                        ? desktop.bluetoothConnectedName
+                                        : "On"))
+                            horizontalAlignment: Text.AlignRight
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.7)
+                            elide: Text.ElideRight
                         }
 
                         MouseArea {
-                            anchors.fill: parent
+                            anchors {
+                                left: parent.left
+                                top: parent.top
+                                bottom: parent.bottom
+                                right: dashMirrorBluetoothToggle.left
+                                rightMargin: desktop.p(5)
+                            }
+
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: desktop.toggleBluetooth()
+                        }
+
+                        MouseArea {
+                            anchors.fill: dashMirrorBluetoothToggle
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             enabled: !desktop.bluetoothBusy
                             onClicked: desktop.toggleBluetooth()
                         }
                     }
-                }
 
-                Item {
-                    width: parent.width
-                    height: desktop.p(15)
+Item {
+    id: dashMirrorDndRow
 
-                    PremiumIcon {
-                        id: dashboardDndIcon
+    width: parent.width
+    height: desktop.p(15)
 
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                        }
+    PremiumIcon {
+        id: dashMirrorDndRowIcon
 
-                        source: Qt.resolvedUrl("icons/moon.svg")
-                        size: desktop.p(12)
-                        iconOpacity: 0.88
-                    }
+        anchors {
+            left: parent.left
+            verticalCenter: parent.verticalCenter
+        }
 
-                    Text {
-                        anchors {
-                            left: dashboardDndIcon.right
-                            leftMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
-                        }
+        source: Qt.resolvedUrl("icons/moon.svg")
+        size: desktop.p(13)
+        iconOpacity: desktop.dndEnabled ? 0.96 : 0.58
+    }
 
-                        width: desktop.p(72)
-                        text: "Do Not Disturb"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8.2)
-                        elide: Text.ElideRight
-                    }
+    Text {
+        anchors {
+            left: dashMirrorDndRowIcon.right
+            leftMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
 
-                    Rectangle {
-                        id: dashboardDndSwitch
+        width: desktop.p(72)
+        text: "Do Not Disturb"
+        color: desktop.dndEnabled
+            ? desktop.graphite
+            : desktop.softInk
+        font.family: "Inter"
+        font.pixelSize: desktop.p(8.5)
+        elide: Text.ElideRight
+    }
 
-                        anchors {
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
-                        }
+    Rectangle {
+        id: dashMirrorDndSwitch
 
-                        width: desktop.p(20)
-                        height: desktop.p(11)
-                        radius: height / 2
-                        color: "#B9B1A8"
+        anchors {
+            right: parent.right
+            verticalCenter: parent.verticalCenter
+        }
 
-                        Rectangle {
-                            width: desktop.p(7)
-                            height: desktop.p(7)
-                            radius: width / 2
-                            color: desktop.warmWhite
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: desktop.p(2)
-                        }
-                    }
+        width: desktop.p(20)
+        height: desktop.p(11)
+        radius: height / 2
+        color: desktop.dndEnabled
+            ? desktop.softInk
+            : "#B9B1A8"
+        opacity: desktop.dndBusy ? 0.58 : 1
 
-                    Text {
-                        anchors {
-                            right: dashboardDndSwitch.left
-                            rightMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
-                        }
+        Rectangle {
+            width: desktop.p(7)
+            height: desktop.p(7)
+            radius: width / 2
+            color: desktop.warmWhite
+            anchors.verticalCenter: parent.verticalCenter
 
-                        width: desktop.p(28)
-                        text: "Off"
-                        horizontalAlignment: Text.AlignRight
-                        color: desktop.mutedInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(7.2)
-                    }
-                }
+            x: desktop.dndEnabled
+                ? parent.width - width - desktop.p(2)
+                : desktop.p(2)
 
-                Rectangle {
-                    width: parent.width
-                    height: Math.max(1, desktop.p(0.65))
-                    color: "#52D8CCBC"
-                }
-
-                Item {
-                    width: parent.width
-                    height: desktop.p(16)
-
-                    PremiumIcon {
-                        id: dashboardBatteryIcon
-
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        source: Qt.resolvedUrl("icons/battery.svg")
-                        size: desktop.p(12)
-                        iconOpacity: 0.82
-                    }
-
-                    Text {
-                        anchors {
-                            left: dashboardBatteryIcon.right
-                            leftMargin: desktop.p(7)
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        text: "Battery"
-                        color: desktop.softInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(8.1)
-                    }
-
-                    Text {
-                        anchors {
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        text: desktop.batteryPercent + "%"
-                        color: desktop.mutedInk
-                        font.family: "Inter"
-                        font.pixelSize: desktop.p(7.2)
-                        font.weight: Font.Normal
-                    }
-                }
-
-                Item {
-                    width: parent.width
-                    height: desktop.p(18)
-
-                    PremiumIcon {
-                        id: dashboardVolumeLeft
-
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        source: Qt.resolvedUrl("icons/volume.svg")
-                        size: desktop.p(10)
-                        iconOpacity: 0.74
-                    }
-
-                    Slider {
-                        anchors {
-                            left: dashboardVolumeLeft.right
-                            leftMargin: desktop.p(7)
-                            right: parent.right
-                            top: parent.top
-                            bottom: parent.bottom
-                        }
-
-                        from: 0
-                        to: 1
-                        value: desktop.volumeLevel
-                        live: true
-                        padding: 0
-
-                        onMoved: desktop.queueVolume(value)
-
-                        background: Rectangle {
-                            x: parent.leftPadding
-                            y: parent.topPadding
-                                + parent.availableHeight / 2
-                                - height / 2
-                            width: parent.availableWidth
-                            height: desktop.p(1.6)
-                            radius: height / 2
-                            color: "#CBC1B5"
-
-                            Rectangle {
-                                width: parent.parent.visualPosition * parent.width
-                                height: parent.height
-                                radius: parent.radius
-                                color: desktop.softInk
-                            }
-                        }
-
-                        handle: Rectangle {
-                            x: parent.leftPadding
-                                + parent.visualPosition
-                                * (parent.availableWidth - width)
-                            y: parent.topPadding
-                                + parent.availableHeight / 2
-                                - height / 2
-                            width: desktop.p(8)
-                            height: desktop.p(8)
-                            radius: width / 2
-                            color: desktop.warmWhite
-                            border.width: Math.max(1, desktop.p(0.6))
-                            border.color: "#AFA69D"
-                        }
-                    }
-                }
-
-                Item {
-                    width: parent.width
-                    height: desktop.p(18)
-
-                    PremiumIcon {
-                        id: dashboardBrightnessLeft
-
-                        anchors {
-                            left: parent.left
-                            verticalCenter: parent.verticalCenter
-                        }
-
-                        source: Qt.resolvedUrl("icons/brightness.svg")
-                        size: desktop.p(10)
-                        iconOpacity: 0.74
-                    }
-
-                    Slider {
-                        anchors {
-                            left: dashboardBrightnessLeft.right
-                            leftMargin: desktop.p(7)
-                            right: parent.right
-                            top: parent.top
-                            bottom: parent.bottom
-                        }
-
-                        from: 0.01
-                        to: 1
-                        value: desktop.brightnessLevel
-                        live: true
-                        padding: 0
-
-                        onMoved: desktop.queueBrightness(value)
-
-                        background: Rectangle {
-                            x: parent.leftPadding
-                            y: parent.topPadding
-                                + parent.availableHeight / 2
-                                - height / 2
-                            width: parent.availableWidth
-                            height: desktop.p(1.6)
-                            radius: height / 2
-                            color: "#CBC1B5"
-
-                            Rectangle {
-                                width: parent.parent.visualPosition * parent.width
-                                height: parent.height
-                                radius: parent.radius
-                                color: desktop.softInk
-                            }
-                        }
-
-                        handle: Rectangle {
-                            x: parent.leftPadding
-                                + parent.visualPosition
-                                * (parent.availableWidth - width)
-                            y: parent.topPadding
-                                + parent.availableHeight / 2
-                                - height / 2
-                            width: desktop.p(8)
-                            height: desktop.p(8)
-                            radius: width / 2
-                            color: desktop.warmWhite
-                            border.width: Math.max(1, desktop.p(0.6))
-                            border.color: "#AFA69D"
-                        }
-                    }
+            Behavior on x {
+                NumberAnimation {
+                    duration: 110
+                    easing.type: Easing.OutCubic
                 }
             }
         }
+    }
+
+    Text {
+        anchors {
+            right: dashMirrorDndSwitch.left
+            rightMargin: desktop.p(7)
+            verticalCenter: parent.verticalCenter
+        }
+
+        width: desktop.p(28)
+        text: desktop.dndBusy
+            ? "..."
+            : (desktop.dndEnabled ? "On" : "Off")
+        horizontalAlignment: Text.AlignRight
+        color: desktop.mutedInk
+        font.family: "Inter"
+        font.pixelSize: desktop.p(8.5)
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        enabled: !desktop.dndBusy
+        onClicked: desktop.toggleDnd()
+    }
+}
+
+                    Rectangle {
+                        width: parent.width
+                        height: Math.max(1, desktop.p(0.65))
+                        color: "#52D8CCBC"
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+PremiumIcon {
+    id: dashMirrorBatteryRowIcon
+
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+
+    source: Qt.resolvedUrl("icons/battery.svg")
+    size: desktop.p(13)
+    iconOpacity: 0.88
+}
+
+                        Text {
+                            anchors {
+                                left: dashMirrorBatteryRowIcon.right
+                                leftMargin: desktop.p(7)
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: "Battery"
+                            color: desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(8.8)
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: desktop.batteryPercent + "%"
+                            color: desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.7)
+                            font.weight: Font.Normal
+                        }
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(16)
+
+PremiumIcon {
+    id: dashMirrorVolumeLeft
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/volume.svg")
+    size: desktop.p(13)
+    iconOpacity: 0.84
+}
+
+PremiumIcon {
+    id: dashMirrorVolumeRight
+    anchors {
+        right: parent.right
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/volume.svg")
+    size: desktop.p(11)
+    iconOpacity: 0.74
+}
+
+                        Slider {
+                            id: dashMirrorVolumeSlider
+
+                            anchors {
+                                left: dashMirrorVolumeLeft.right
+                                leftMargin: desktop.p(7)
+                                right: dashMirrorVolumeRight.left
+                                rightMargin: desktop.p(7)
+                                top: parent.top
+                                bottom: parent.bottom
+                            }
+
+                            implicitHeight: desktop.p(16)
+                            z: 2
+                            hoverEnabled: true
+
+                            from: 0
+                            to: 1
+                            value: desktop.volumeLevel
+                            padding: 0
+
+                            live: true
+
+                            onMoved: desktop.queueVolume(value)
+
+                            onPressedChanged: {
+                                if (!pressed)
+                                    desktop.queueVolume(value)
+                            }
+
+                            background: Rectangle {
+                                x: dashMirrorVolumeSlider.leftPadding
+                                y: dashMirrorVolumeSlider.topPadding
+                                    + dashMirrorVolumeSlider.availableHeight / 2
+                                    - height / 2
+                                width: dashMirrorVolumeSlider.availableWidth
+                                height: desktop.p(1.6)
+                                radius: height / 2
+                                color: "#CBC1B5"
+
+                                Rectangle {
+                                    width: dashMirrorVolumeSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: parent.radius
+                                    color: desktop.softInk
+                                }
+                            }
+
+                            handle: Rectangle {
+                                x: dashMirrorVolumeSlider.leftPadding
+                                    + dashMirrorVolumeSlider.visualPosition
+                                    * (dashMirrorVolumeSlider.availableWidth - width)
+                                y: dashMirrorVolumeSlider.topPadding
+                                    + dashMirrorVolumeSlider.availableHeight / 2
+                                    - height / 2
+                                width: desktop.p(8)
+                                height: desktop.p(8)
+                                radius: width / 2
+                                color: desktop.warmWhite
+                                border.width: Math.max(1, desktop.p(0.6))
+                                border.color: "#AFA69D"
+                            }
+                        }
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(16)
+
+PremiumIcon {
+    id: dashMirrorBrightnessLeft
+    anchors {
+        left: parent.left
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/brightness.svg")
+    size: desktop.p(13)
+    iconOpacity: 0.84
+}
+
+PremiumIcon {
+    id: dashMirrorBrightnessRight
+    anchors {
+        right: parent.right
+        verticalCenter: parent.verticalCenter
+    }
+    source: Qt.resolvedUrl("icons/brightness.svg")
+    size: desktop.p(11)
+    iconOpacity: 0.74
+}
+
+                        Slider {
+                            id: dashMirrorBrightnessSlider
+
+                            anchors {
+                                left: dashMirrorBrightnessLeft.right
+                                leftMargin: desktop.p(7)
+                                right: dashMirrorBrightnessRight.left
+                                rightMargin: desktop.p(7)
+                                top: parent.top
+                                bottom: parent.bottom
+                            }
+
+                            implicitHeight: desktop.p(16)
+                            z: 2
+                            hoverEnabled: true
+
+                            from: 0.01
+                            to: 1
+                            value: desktop.brightnessLevel
+                            padding: 0
+
+                            live: true
+
+                            onMoved: desktop.queueBrightness(value)
+
+                            onPressedChanged: {
+                                if (!pressed)
+                                    desktop.queueBrightness(value)
+                            }
+
+                            background: Rectangle {
+                                x: dashMirrorBrightnessSlider.leftPadding
+                                y: dashMirrorBrightnessSlider.topPadding
+                                    + dashMirrorBrightnessSlider.availableHeight / 2
+                                    - height / 2
+                                width: dashMirrorBrightnessSlider.availableWidth
+                                height: desktop.p(1.6)
+                                radius: height / 2
+                                color: "#CBC1B5"
+
+                                Rectangle {
+                                    width: dashMirrorBrightnessSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    radius: parent.radius
+                                    color: desktop.softInk
+                                }
+                            }
+
+                            handle: Rectangle {
+                                x: dashMirrorBrightnessSlider.leftPadding
+                                    + dashMirrorBrightnessSlider.visualPosition
+                                    * (dashMirrorBrightnessSlider.availableWidth - width)
+                                y: dashMirrorBrightnessSlider.topPadding
+                                    + dashMirrorBrightnessSlider.availableHeight / 2
+                                    - height / 2
+                                width: desktop.p(8)
+                                height: desktop.p(8)
+                                radius: width / 2
+                                color: desktop.warmWhite
+                                border.width: Math.max(1, desktop.p(0.6))
+                                border.color: "#AFA69D"
+                            }
+                        }
+                    }
+
+Rectangle {
+    id: dashboardMediaRowSeparator
+    width: parent.width
+    height: Math.max(1, desktop.p(0.65))
+    color: "#52D8CCBC"
+    visible: dashboardMediaRow.visible
+}
+
+PrecisionMediaRow {
+    id: dashboardMediaRow
+    width: parent.width
+    unit: desktop.p(1)
+    graphite: desktop.graphite
+    softInk: desktop.softInk
+    mutedInk: desktop.mutedInk
+}
+
+Rectangle {
+    id: dashboardSessionRowSeparator
+    width: parent.width
+    height: Math.max(1, desktop.p(0.65))
+    color: "#52D8CCBC"
+}
+
+PrecisionSessionRow {
+    id: dashboardSessionRow
+    width: parent.width
+    unit: desktop.p(1)
+    graphite: desktop.graphite
+    softInk: desktop.softInk
+    mutedInk: desktop.mutedInk
+    helperPath: "__HOME__/.local/bin/precision-session-action"
+}
+                }
+            }
+
+MouseArea {
+    id: dashboardWifiMenuDismissLayer
+
+    anchors.fill: parent
+    z: 89
+
+    visible: root.dashboardWifiMenuOpen
+    enabled: visible
+
+    acceptedButtons: Qt.AllButtons
+    cursorShape: Qt.ArrowCursor
+    preventStealing: true
+    propagateComposedEvents: false
+
+    onPressed: function(mouse) {
+        mouse.accepted = true
+    }
+
+    onClicked: function(mouse) {
+        root.dashboardWifiMenuOpen = false
+        mouse.accepted = true
+    }
+}
+
+Rectangle {
+    id: dashboardWifiMenu
+
+    anchors {
+        right: dashboardSettings.left
+        rightMargin: desktop.p(9)
+        bottom: dashboardSettings.bottom
+    }
+
+    width: desktop.p(178)
+    height: desktop.p(170)
+    radius: desktop.p(10)
+    z: 90
+
+    color: desktop.panelSurface
+    border.width: Math.max(1, desktop.p(0.65))
+    border.color: desktop.panelBorder
+
+    visible: opacity > 0
+    enabled: root.dashboardWifiMenuOpen
+    opacity: root.dashboardWifiMenuOpen ? 1 : 0
+    scale: root.dashboardWifiMenuOpen ? 1 : 0.985
+
+    Behavior on opacity {
+        NumberAnimation {
+            duration: 140
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    Behavior on scale {
+        NumberAnimation {
+            duration: 140
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        z: 1
+        acceptedButtons: Qt.AllButtons
+        preventStealing: true
+        propagateComposedEvents: false
+
+        onPressed: function(mouse) {
+            mouse.accepted = true
+        }
+
+        onClicked: function(mouse) {
+            mouse.accepted = true
+        }
+    }
+
+    Column {
+        z: 2
+
+        anchors {
+            fill: parent
+            margins: desktop.p(12)
+        }
+
+        spacing: desktop.p(7)
+
+        Item {
+            width: parent.width
+            height: desktop.p(17)
+
+            Text {
+                anchors {
+                    left: parent.left
+                    verticalCenter: parent.verticalCenter
+                }
+
+                text: "Wi-Fi"
+                color: desktop.graphite
+                font.family: "Inter"
+                font.pixelSize: desktop.p(9.0)
+                font.weight: Font.Medium
+            }
+
+            Text {
+                anchors {
+                    right: parent.right
+                    verticalCenter: parent.verticalCenter
+                }
+
+                text: desktop.wifiScanning
+                    ? "Analyse..."
+                    : "Actualiser"
+                color: desktop.wifiScanning
+                    ? desktop.mutedInk
+                    : desktop.softInk
+                font.family: "Inter"
+                font.pixelSize: desktop.p(7.1)
+
+                MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -desktop.p(5)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: desktop.wifiEnabled
+                        && !desktop.wifiScanning
+                    onClicked: desktop.scanWifi()
+                }
+            }
+        }
+
+        Rectangle {
+            width: parent.width
+            height: Math.max(1, desktop.p(0.65))
+            color: "#52D8CCBC"
+        }
+
+        Item {
+            width: parent.width
+            height: desktop.p(15)
+
+            PremiumIcon {
+                id: dashboardActiveWifiIcon
+
+                anchors {
+                    left: parent.left
+                    verticalCenter: parent.verticalCenter
+                }
+
+                source: Qt.resolvedUrl("icons/wifi.svg")
+                size: desktop.p(11)
+                iconOpacity: desktop.wifiConnected ? 0.90 : 0.44
+            }
+
+            Text {
+                anchors {
+                    left: dashboardActiveWifiIcon.right
+                    leftMargin: desktop.p(7)
+                    right: parent.right
+                    verticalCenter: parent.verticalCenter
+                }
+
+                text: !desktop.wifiEnabled
+                    ? "Wi-Fi désactivé"
+                    : (desktop.wifiConnected
+                        ? desktop.wifiSsid
+                        : "Non connecté")
+                color: desktop.wifiConnected
+                    ? desktop.graphite
+                    : desktop.mutedInk
+                font.family: "Inter"
+                font.pixelSize: desktop.p(7.9)
+                elide: Text.ElideRight
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: desktop.wifiEnabled
+                    ? Qt.ArrowCursor
+                    : Qt.PointingHandCursor
+                enabled: !desktop.wifiEnabled
+                    && !desktop.wifiBusy
+                onClicked: desktop.toggleWifi()
+            }
+        }
+
+        ListView {
+            id: dashboardWifiNetworkList
+
+            width: parent.width
+            height: desktop.p(88)
+            clip: true
+            spacing: desktop.p(1)
+            model: desktop.wifiNetworks
+            interactive: contentHeight > height
+            visible: desktop.wifiEnabled
+
+            delegate: Item {
+                required property var modelData
+
+                width: dashboardWifiNetworkList.width
+                height: desktop.p(20)
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: desktop.p(5)
+                    color: dashboardNetworkMouse.containsMouse
+                        ? "#3AD8CCBC"
+                        : "transparent"
+                }
+
+                PremiumIcon {
+                    id: dashboardNetworkIcon
+
+                    anchors {
+                        left: parent.left
+                        verticalCenter: parent.verticalCenter
+                    }
+
+                    source: Qt.resolvedUrl("icons/wifi.svg")
+                    size: desktop.p(10)
+                    iconOpacity: modelData.connected ? 0.95 : 0.68
+                }
+
+                Column {
+                    anchors {
+                        left: dashboardNetworkIcon.right
+                        leftMargin: desktop.p(6)
+                        right: dashboardSignalText.left
+                        rightMargin: desktop.p(7)
+                        verticalCenter: parent.verticalCenter
+                    }
+
+                    spacing: desktop.p(0.5)
+
+                    Text {
+                        width: parent.width
+                        text: modelData.ssid
+                        color: modelData.connected
+                            ? desktop.graphite
+                            : desktop.softInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(7.5)
+                        font.weight: modelData.connected
+                            ? Font.Medium
+                            : Font.Normal
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: modelData.connected
+                            ? "Connecté"
+                            : (modelData.security.length > 0
+                                && modelData.security !== "--"
+                                ? "Sécurisé"
+                                : "Ouvert")
+                        color: desktop.mutedInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(6.1)
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Text {
+                    id: dashboardSignalText
+
+                    anchors {
+                        right: parent.right
+                        verticalCenter: parent.verticalCenter
+                    }
+
+                    text: modelData.signal + "%"
+                    color: desktop.mutedInk
+                    font.family: "Inter"
+                    font.pixelSize: desktop.p(6.3)
+                }
+
+                MouseArea {
+                    id: dashboardNetworkMouse
+
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: !desktop.wifiBusy
+                    onClicked: desktop.connectWifi(modelData.ssid)
+                }
+            }
+        }
+
+        Text {
+            width: parent.width
+            height: desktop.p(12)
+            visible: desktop.wifiMessage.length > 0
+            text: desktop.wifiMessage
+            color: desktop.mutedInk
+            font.family: "Inter"
+            font.pixelSize: desktop.p(6.6)
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+}
+    }
+
+    SettingsWindow {
+        id: precisionSettings
+        shellRoot: root
+        desktopContext: desktop
     }
 
     PanelWindow {
@@ -4248,32 +5493,52 @@ ShellRoot {
 
         color: "transparent"
 
-        function filteredItems() {
-            const query = launcherSearch.text.trim().toLowerCase()
+function filteredItems() {
+    const query = launcherSearch.text.trim().toLowerCase()
+    const baseItems = root.launcherAllMode || query.length > 0
+        ? desktop.allAppItems
+        : desktop.appItems
 
-            if (query.length === 0)
-                return desktop.appItems
+    if (query.length === 0)
+        return baseItems
 
-            return desktop.appItems.filter(function(item) {
-                return item.title.toLowerCase().indexOf(query) !== -1
-                    || item.subtitle.toLowerCase().indexOf(query) !== -1
-                    || item.lookup.toLowerCase().indexOf(query) !== -1
+    const matches = baseItems.filter(function(item) {
+        const title = (item.title || "").toLowerCase()
+        const subtitle = (item.subtitle || "").toLowerCase()
+        const lookup = (item.lookup || "").toLowerCase()
+
+        return title.indexOf(query) !== -1
+            || subtitle.indexOf(query) !== -1
+            || lookup.indexOf(query) !== -1
+    })
+
+    return root.launcherAllMode ? matches : matches.slice(0, 4)
+}
+
+function launchItem(item) {
+
+    if (item.action === "precision-settings") {
+        root.openSettings(0)
+        return
+    }
+    if (item.desktopFile && item.desktopFile.length > 0) {
+        Quickshell.execDetached({
+            command: ["gio", "launch", item.desktopFile]
+        })
+    } else {
+        const entry = DesktopEntries.heuristicLookup(item.lookup)
+
+        if (entry !== null) {
+            entry.execute()
+        } else {
+            Quickshell.execDetached({
+                command: item.fallback
             })
         }
+    }
 
-        function launchItem(item) {
-            const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
-
-            if (desktopEntry !== null) {
-                desktopEntry.execute()
-            } else {
-                Quickshell.execDetached({
-                    command: item.fallback
-                })
-            }
-
-            root.closeLauncher()
-        }
+    root.closeLauncher()
+}
 
         Shortcut {
             enabled: root.launcherOpen
@@ -4292,17 +5557,29 @@ ShellRoot {
             onClicked: root.closeLauncher()
         }
 
+Rectangle {
+    id: allAppsBackdrop
+    anchors.fill: parent
+    visible: root.launcherAllMode
+    color: "#59000000"
+
+    MouseArea {
+        anchors.fill: parent
+        onClicked: root.closeLauncher()
+    }
+}
+
         Rectangle {
             id: launcherCard
 
             anchors {
                 horizontalCenter: parent.horizontalCenter
                 bottom: parent.bottom
-                bottomMargin: desktop.p(97)
+                bottomMargin: root.launcherAllMode ? desktop.p(58) : desktop.p(97)
             }
 
-            width: desktop.p(438)
-            height: desktop.p(123)
+            width: root.launcherAllMode ? desktop.p(620) : desktop.p(438)
+            height: root.launcherAllMode ? desktop.p(390) : desktop.p(123)
             radius: desktop.p(10)
 
             color: desktop.panelSurface
@@ -4344,6 +5621,14 @@ ShellRoot {
                 TextField {
                     id: launcherSearch
 
+
+                    onTextChanged: {
+                        if (text.trim().length > 0
+                                && !desktop.allAppsLoaded
+                                && !allAppsReader.running) {
+                            allAppsReader.running = true
+                        }
+                    }
                     anchors {
                         left: parent.left
                         leftMargin: desktop.p(38)
@@ -4356,7 +5641,9 @@ ShellRoot {
                     color: desktop.graphite
                     selectedTextColor: desktop.graphite
                     selectionColor: desktop.sand
-                    placeholderText: "Search or type a command..."
+                    placeholderText: root.launcherAllMode
+                        ? "Search all applications..."
+                        : "Search or type a command..."
                     placeholderTextColor: "#A19990"
                     font.family: "Inter"
                     font.pixelSize: desktop.p(9.8)
@@ -4390,7 +5677,9 @@ ShellRoot {
                         verticalCenter: parent.verticalCenter
                     }
 
-                    text: "SUPER  SPACE"
+                    text: root.launcherAllMode
+                        ? "ALL APPS"
+                        : "SUPER  SPACE"
                     color: "#A89F96"
                     font.family: "Inter"
                     font.pixelSize: desktop.p(6.1)
@@ -4424,93 +5713,159 @@ ShellRoot {
                 font.pixelSize: desktop.p(8)
             }
 
-            Row {
-                anchors {
-                    horizontalCenter: parent.horizontalCenter
-                    bottom: parent.bottom
-                    bottomMargin: desktop.p(12)
-                }
+Item {
+    anchors {
+        left: parent.left
+        right: parent.right
+        top: parent.top
+        topMargin: desktop.p(46)
+        bottom: parent.bottom
+    }
 
-                spacing: desktop.p(31)
+    Row {
+        visible: !root.launcherAllMode
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: desktop.p(12)
+        }
+        spacing: desktop.p(31)
 
-                Repeater {
-                    model: launcherWindow.filteredItems()
+        Repeater {
+            model: launcherWindow.filteredItems()
 
-                    delegate: Item {
-                        id: launcherTile
+            delegate: Item {
+                id: launcherTile
+                required property var modelData
+                width: desktop.p(64)
+                height: desktop.p(56)
 
-                        required property var modelData
+                Column {
+                    anchors.centerIn: parent
+                    spacing: desktop.p(3)
 
-                        width: desktop.p(64)
-                        height: desktop.p(56)
+                    PremiumIcon {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        source: Qt.resolvedUrl(
+                            "icons/" + modelData.icon
+                        )
+                        size: desktop.p(20)
+                        iconOpacity: quickTileMouse.containsMouse
+                            ? 1
+                            : 0.88
+                    }
 
-                        Rectangle {
-                            anchors {
-                                horizontalCenter: parent.horizontalCenter
-                                bottom: parent.bottom
-                                bottomMargin: desktop.p(1)
-                            }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData.title
+                        color: desktop.softInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(8.8)
+                    }
 
-                            width: desktop.p(22)
-                            height: Math.max(1, desktop.p(0.7))
-                            radius: height / 2
-                            color: desktop.softInk
-                            opacity: launcherTileMouse.containsMouse ? 0.48 : 0
-
-                            Behavior on opacity {
-                                NumberAnimation {
-                                    duration: 85
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-
-                        Column {
-                            anchors.centerIn: parent
-                            spacing: desktop.p(3)
-
-                            PremiumIcon {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                source: Qt.resolvedUrl(
-                                    "icons/" + modelData.icon
-                                )
-                                size: desktop.p(20)
-                                iconOpacity: launcherTileMouse.containsMouse
-                                    ? 1.0
-                                    : 0.88
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData.title
-                                color: launcherTileMouse.containsMouse
-                                    ? desktop.graphite
-                                    : desktop.softInk
-                                font.family: "Inter"
-                                font.pixelSize: desktop.p(8.8)
-                                font.weight: Font.Normal
-                            }
-
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: modelData.subtitle
-                                color: desktop.mutedInk
-                                font.family: "Inter"
-                                font.pixelSize: desktop.p(7.2)
-                            }
-                        }
-
-                        MouseArea {
-                            id: launcherTileMouse
-
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: launcherWindow.launchItem(modelData)
-                        }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData.subtitle
+                        color: desktop.mutedInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(7.2)
                     }
                 }
+
+                MouseArea {
+                    id: quickTileMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: launcherWindow.launchItem(modelData)
+                }
             }
+        }
+    }
+
+    GridView {
+        id: allAppsGrid
+        visible: root.launcherAllMode
+
+        anchors {
+            fill: parent
+            margins: desktop.p(15)
+            topMargin: desktop.p(14)
+        }
+
+        clip: true
+        cellWidth: desktop.p(116)
+        cellHeight: desktop.p(72)
+        model: launcherWindow.filteredItems()
+
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
+
+        delegate: Item {
+            id: allAppsTile
+            required property var modelData
+            width: allAppsGrid.cellWidth
+            height: allAppsGrid.cellHeight
+
+            Rectangle {
+                anchors {
+                    fill: parent
+                    margins: desktop.p(4)
+                }
+                radius: desktop.p(7)
+                color: allAppsMouse.containsMouse
+                    ? "#42D8CCBC"
+                    : "transparent"
+            }
+
+            Column {
+                anchors {
+                    fill: parent
+                    margins: desktop.p(8)
+                }
+                spacing: desktop.p(4)
+
+                PremiumIcon {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    source: Qt.resolvedUrl(
+                        "icons/" + modelData.icon
+                    )
+                    size: desktop.p(22)
+                    iconOpacity: 0.86
+                }
+
+                Text {
+                    width: parent.width
+                    text: modelData.title
+                    horizontalAlignment: Text.AlignHCenter
+                    color: desktop.softInk
+                    font.family: "Inter"
+                    font.pixelSize: desktop.p(8.2)
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    width: parent.width
+                    text: modelData.subtitle
+                    horizontalAlignment: Text.AlignHCenter
+                    color: desktop.mutedInk
+                    font.family: "Inter"
+                    font.pixelSize: desktop.p(6.8)
+                    elide: Text.ElideRight
+                }
+            }
+
+            MouseArea {
+                id: allAppsMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: launcherWindow.launchItem(modelData)
+            }
+        }
+    }
+}
         }
     }
 
@@ -4575,12 +5930,10 @@ ShellRoot {
                 }
             }
 
-            Keys.onReleased: function(event) {
-                if (event.key === Qt.Key_Alt) {
-                    root.confirmSwitcher()
-                    event.accepted = true
-                }
-            }
+Keys.onReleased: function(event) {
+    // Le relâchement d'Alt est validé par
+    // precision-alt-release.service.
+}
         }
 
         Rectangle {

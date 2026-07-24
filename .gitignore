@@ -1,17 +1,26 @@
-# Outils QML locaux
-.qmlls.ini
-*.log
 
-# Fonds photographiques non distribués
-assets/wallpaper.jpg
-assets/wallpaper.jpeg
-assets/wallpaper.png
-
-# Fichiers temporaires
-.DS_Store
 *~
-
-shell.qml.bak-*
+assets/wallpaper.jpeg
+assets/wallpaper.jpg
+assets/wallpaper.png
 *.backup-*
 *.bak-*
+.DS_Store
+.env
+.env.*
+# Fichiers locaux et personnels
+# Fichiers temporaires
+# Fonds photographiques non distribués
+local/
+*.log
+# Outils QML locaux
+preferences.json
 __pycache__/
+.qmlls.ini
+screenshots-private/
+shell.qml.bak-*
+*.tar.gz
+wallpaper.jpg
+wallpaper.png
+weather-cache.json
+wifi-cache.json

@@ -328,6 +328,11 @@ window-rule {
     match app-id=r#"firefox$"# title="^Picture-in-Picture$"
     open-floating true
 }
+window-rule {
+    match app-id="proton.vpn.app.gtk"
+
+    open-floating false
+}
 
 // Example: block out two password managers from screen capture.
 // (This example rule is commented out with a "/-" in front.)
@@ -349,10 +354,21 @@ window-rule {
 }
 
 binds {
-    Super+L repeat=false allow-inhibiting=false hotkey-overlay-title="Verrouiller et mettre en veille" { spawn "/home/alexistissier/.local/bin/precision-lock-suspend"; }
-    Alt+Tab repeat=false hotkey-overlay-title="Precision Switcher" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "switcher" "next"; }
-    Alt+Shift+Tab repeat=false hotkey-overlay-title="Precision Switcher — précédent" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "switcher" "previous"; }
-    Alt+F4 repeat=false hotkey-overlay-title="Fermer la fenêtre" { close-window; }
+    F1 repeat=false allow-inhibiting=false hotkey-overlay-title="Masquer les widgets" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "desktopView" "hide"; }
+    F2 repeat=false allow-inhibiting=false hotkey-overlay-title="Palette" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "desktopView" "palette"; }
+    F3 repeat=false allow-inhibiting=false hotkey-overlay-title="Réglages" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "desktopView" "settings"; }
+    F4 repeat=false allow-inhibiting=false hotkey-overlay-title="Tous les widgets" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "desktopView" "all"; }
+    Alt+Tab repeat=false allow-inhibiting=false hotkey-overlay-title="Precision Switcher" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "switcher" "next"; }
+    Alt+Shift+Tab repeat=false allow-inhibiting=false hotkey-overlay-title="Precision Switcher — précédent" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "switcher" "previous"; }
+    Alt+F4 repeat=false allow-inhibiting=false hotkey-overlay-title="Fermer la fenêtre" { close-window; }
+    Super+E repeat=false allow-inhibiting=false hotkey-overlay-title="Ouvrir les fichiers" { spawn-sh "\"__HOME__/.local/bin/precision-close-launcher\"; gio open \"__HOME__\""; }
+    Super+R repeat=false allow-inhibiting=false hotkey-overlay-title="Exécuter une application" { spawn-sh "qs -c precision-shell ipc call launcher toggle"; }
+    Super+D repeat=false allow-inhibiting=false hotkey-overlay-title="Afficher le tableau de bord" { spawn-sh "\"__HOME__/.local/bin/precision-close-launcher\"; qs -c precision-shell ipc call dashboard toggle"; }
+    Super+Space repeat=false allow-inhibiting=false hotkey-overlay-title="Rechercher" { spawn-sh "qs -c precision-shell ipc call launcher toggle"; }
+    Super+S repeat=false allow-inhibiting=false hotkey-overlay-title="Fedora Settings" { spawn "__HOME__/.local/bin/precision-open-fedora-settings"; }
+    Super+Shift+S repeat=false allow-inhibiting=false hotkey-overlay-title="Precision Settings" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "settingsPage" "toggle"; }
+    Ctrl+Shift+Escape repeat=false allow-inhibiting=false hotkey-overlay-title="Gestionnaire des tâches" { spawn-sh "\"__HOME__/.local/bin/precision-close-launcher\"; command -v gnome-system-monitor >/dev/null && exec gnome-system-monitor || exec alacritty -e sh -lc 'top; exec sh'"; }
+    Super+L repeat=false allow-inhibiting=false hotkey-overlay-title="Verrouiller et mettre en veille" { spawn "__HOME__/.local/bin/precision-lock-suspend"; }
     Alt+F10 repeat=false hotkey-overlay-title="Maximiser/restaurer" { maximize-column; }
     Mod+F1 repeat=false hotkey-overlay-title="Afficher/masquer les widgets" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "desktopWidgets" "toggle"; }
     Mod+Space repeat=false hotkey-overlay-title="Applications" { spawn "/usr/bin/qs" "-c" "precision-shell" "ipc" "call" "launcher" "toggle"; }
@@ -581,7 +597,7 @@ binds {
 
     Mod+C { center-column; }
 
-    // Center all fully visible columns on screen.
+    // Center all fully visible columns on scree
     Mod+Ctrl+C { center-visible-columns; }
 
     // Finer width adjustments.
