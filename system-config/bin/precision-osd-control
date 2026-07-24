@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+QS_BIN="$(command -v qs)"
+ACTION="${1:-}"
+
+show_volume() {
+    local level
+    level="$(
+        wpctl get-volume @DEFAULT_AUDIO_SINK@ \
+            | awk '{printf "%.4f", $2}'
+    )"
+
+    "$QS_BIN" -c precision-shell \
+        ipc call osd show volume "$level" >/dev/null 2>&1 || true
+}
+
+show_brightness() {
+    local current maximum level
+    current="$(brightnessctl -d intel_backlight get)"
+    maximum="$(brightnessctl -d intel_backlight max)"
+
+    level="$(
+        awk -v current="$current" -v maximum="$maximum" \
+            'BEGIN {
+                if (maximum <= 0) print "0";
+                else printf "%.4f", current / maximum
+            }'
+    )"
+
+    "$QS_BIN" -c precision-shell \
+        ipc call osd show brightness "$level" >/dev/null 2>&1 || true
+}
+
+case "$ACTION" in
+    volume-up)
+        wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+
+        show_volume
+        ;;
+    volume-down)
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-
+        show_volume
+        ;;
+    brightness-up)
+        brightnessctl -q -d intel_backlight set 5%+
+        show_brightness
+        ;;
+    brightness-down)
+        brightnessctl -q -d intel_backlight set 5%-
+        show_brightness
+        ;;
+    *)
+        echo "Usage: $0 {volume-up|volume-down|brightness-up|brightness-down}"
+        exit 2
+        ;;
+esac

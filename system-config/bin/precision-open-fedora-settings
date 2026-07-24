@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -u
+
+LOG_FILE="__HOME__/.cache/precision-fedora-settings.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+: >"$LOG_FILE"
+
+if [[ -n "/usr/bin/qs" ]]; then
+    "/usr/bin/qs" -c precision-shell ipc call settingsPage close >/dev/null 2>&1 || true
+    "/usr/bin/qs" -c precision-shell ipc call launcher close >/dev/null 2>&1 || true
+    "/usr/bin/qs" -c precision-shell ipc call dashboard close >/dev/null 2>&1 || true
+fi
+
+env     XDG_CURRENT_DESKTOP=GNOME     XDG_SESSION_DESKTOP=gnome     "/usr/bin/gnome-control-center" >>"$LOG_FILE" 2>&1
+
+status=$?
+
+if [[ "$status" -ne 0 ]] && command -v notify-send >/dev/null 2>&1; then
+    notify-send         "Precision Shell"         "Impossible d'ouvrir les paramètres Fedora. Journal : $LOG_FILE"
+fi
+
+exit "$status"

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Precision Settings
+GenericName=Precision Shell Settings
+Comment=Réglages propres à Precision Shell
+Exec=/usr/bin/qs -c precision-shell ipc call settingsPage toggle
+Icon=preferences-system-symbolic
+Terminal=false
+Categories=Settings;DesktopSettings;
+Keywords=Precision;Shell;Appearance;Weather;Shortcuts;
+StartupNotify=false

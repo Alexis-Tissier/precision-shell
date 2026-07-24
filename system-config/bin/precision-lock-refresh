@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PRECISION_DIR="$HOME/.config/gtklock/precision"
+
+WIFI_ICON="network-wireless-offline-symbolic"
+WIFI_LABEL="Wi-Fi"
+
+if command -v nmcli >/dev/null 2>&1; then
+    WIFI_STATE="$(nmcli -t -f WIFI general 2>/dev/null || true)"
+
+    if [[ "$WIFI_STATE" == "enabled" ]]; then
+        WIFI_ICON="network-wireless-signal-excellent-symbolic"
+        WIFI_LABEL="Wi-Fi"
+    else
+        WIFI_ICON="network-wireless-offline-symbolic"
+        WIFI_LABEL="Wi-Fi désactivé"
+    fi
+fi
+
+BATTERY_ICON="battery-missing-symbolic"
+BATTERY_LABEL="—"
+
+BATTERY_PATH="$(
+    printf '%s\n' /sys/class/power_supply/BAT* \
+        | head -n 1
+)"
+
+if [[ -r "$BATTERY_PATH/capacity" ]]; then
+    CAPACITY="$(cat "$BATTERY_PATH/capacity")"
+    STATUS="$(cat "$BATTERY_PATH/status" 2>/dev/null || true)"
+    BATTERY_LABEL="${CAPACITY} %"
+
+    if (( CAPACITY >= 90 )); then
+        BATTERY_ICON="battery-full-symbolic"
+    elif (( CAPACITY >= 60 )); then
+        BATTERY_ICON="battery-good-symbolic"
+    elif (( CAPACITY >= 30 )); then
+        BATTERY_ICON="battery-low-symbolic"
+    else
+        BATTERY_ICON="battery-caution-symbolic"
+    fi
+
+    if [[ "$STATUS" == "Charging" ]]; then
+        BATTERY_ICON="battery-good-charging-symbolic"
+    fi
+fi
+
+escape_sed() {
+    printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
+}
+
+sed \
+    -e "s|__WIFI_ICON__|$(escape_sed "$WIFI_ICON")|g" \
+    -e "s|__WIFI_LABEL__|$(escape_sed "$WIFI_LABEL")|g" \
+    -e "s|__BATTERY_ICON__|$(escape_sed "$BATTERY_ICON")|g" \
+    -e "s|__BATTERY_LABEL__|$(escape_sed "$BATTERY_LABEL")|g" \
+    "$PRECISION_DIR/layout.template.xml" \
+    > "$PRECISION_DIR/layout.xml"

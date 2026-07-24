@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+import configparser
+import json
+from pathlib import Path
+
+directories = [
+    Path.home() / ".local/share/applications",
+    Path.home() / ".local/share/flatpak/exports/share/applications",
+    Path("/usr/local/share/applications"),
+    Path("/usr/share/applications"),
+    Path("/var/lib/flatpak/exports/share/applications"),
+]
+
+seen = set()
+seen_names = set()
+applications = []
+
+
+def icon_for(name, executable, categories):
+    value = f"{name} {executable} {categories}".lower()
+
+    if "darktable" in value or "photography" in value:
+        return "darktable.svg"
+
+    if any(word in value for word in (
+        "browser", "internet", "firefox", "brave",
+        "chromium", "chrome",
+    )):
+        return "browser.svg"
+
+    if any(word in value for word in (
+        "terminal", "console", "alacritty", "kitty", "konsole",
+    )):
+        return "terminal.svg"
+
+    if any(word in value for word in (
+        "filemanager", "nautilus", "dolphin", "thunar",
+    )):
+        return "files.svg"
+
+    if any(word in value for word in (
+        "editor", "office", "document", "text", "notes",
+    )):
+        return "notes.svg"
+
+    return "apps.svg"
+
+
+for directory in directories:
+    if not directory.is_dir():
+        continue
+
+    for desktop_file in sorted(directory.glob("*.desktop")):
+        desktop_id = desktop_file.name
+
+        if desktop_id in seen:
+            continue
+
+        parser = configparser.ConfigParser(
+            interpolation=None,
+            strict=False,
+        )
+        parser.optionxform = str
+
+        try:
+            parser.read(desktop_file, encoding="utf-8")
+            entry = parser["Desktop Entry"]
+        except Exception:
+            continue
+
+        if entry.get("Type", "Application") != "Application":
+            continue
+
+        if entry.get("Hidden", "false").lower() == "true":
+            continue
+
+        if entry.get("NoDisplay", "false").lower() == "true":
+            continue
+
+        name = entry.get("Name", "").strip()
+        if not name:
+            continue
+
+        name_key = name.casefold()
+        if name_key in seen_names:
+            continue
+
+        executable = entry.get("Exec", "").strip()
+        categories = entry.get("Categories", "").strip()
+        subtitle = entry.get("GenericName", "").strip()
+
+        if not subtitle:
+            subtitle = next(
+                (
+                    category
+                    for category in categories.split(";")
+                    if category
+                    and category not in {
+                        "GTK", "Qt", "GNOME", "KDE", "Application",
+                    }
+                ),
+                "Application",
+            )
+
+        seen.add(desktop_id)
+        seen_names.add(name_key)
+        applications.append({
+            "title": name,
+            "subtitle": subtitle,
+            "lookup": name,
+            "desktopFile": str(desktop_file),
+            "icon": icon_for(name, executable, categories),
+            "fallback": [],
+        })
+
+applications.sort(key=lambda item: item["title"].casefold())
+print(json.dumps(applications, ensure_ascii=False, separators=(",", ":")))
+

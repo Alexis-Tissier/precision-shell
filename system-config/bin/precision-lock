@@ -8,7 +8,7 @@ if pgrep -x gtklock >/dev/null 2>&1; then
     exit 0
 fi
 
-"__HOME__/.local/bin/precision-lock-prepare"
+"__HOME__/.local/bin/precision-lock-refresh"
 
 export LC_TIME=fr_FR.UTF-8
 exec "/usr/bin/gtklock"     --config "__HOME__/.config/gtklock/precision/config-lock-only.ini"

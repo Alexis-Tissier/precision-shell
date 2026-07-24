@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=darktable AI
+Comment=darktable 5.6 avec IA
+Exec=__HOME__/.local/bin/darktable-ai
+Icon=darktable-ai
+Terminal=false
+Type=Application
+Categories=Graphics;Photography;
+StartupNotify=true

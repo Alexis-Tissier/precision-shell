@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# gtklock launches this only after the session is securely locked.
+# Turn the monitors black immediately, then finish suspending.
+niri msg action power-off-monitors >/dev/null 2>&1 || true
+exec systemctl suspend

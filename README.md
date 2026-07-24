@@ -1,32 +1,28 @@
 # Precision Shell
 
-Nom technique temporaire d’un environnement de bureau Linux minimaliste,
-construit avec Quickshell et Qt Quick/QML.
-
-## Vision
-
-Créer une expérience quotidienne calme au repos et puissante à la demande,
-inspirée par la précision et la retenue du design automobile classique.
+Precision Shell est une interface de bureau personnalisée construite avec
+Quickshell pour Fedora et le gestionnaire de fenêtres Niri.
 
 ## État actuel
 
-Prototype visuel exécuté dans GNOME avec une fenêtre Quickshell.
+La dernière base stable documentée est la V28.
 
-## Raccourcis
+Lire :
 
-- F1 : home
-- F2 : palette
-- F3 : réglages rapides
-- F4 : vue complète
-- F11 : plein écran
-- Ctrl+Q : quitter
+- `docs/CURRENT_STATE.md`
+- `docs/LOCAL_VALUES.md`
 
-## Lancement
+## Contenu
 
-Commande :
+- interface Quickshell ;
+- configuration Niri ;
+- scripts système Precision ;
+- lanceurs d'applications ;
+- configuration gtklock ;
+- outils de synchronisation.
 
-    qs -c precision-prototype
+## Synchroniser la machine vers le dépôt
 
-## Confidentialité
-
-Le fond photographique local n’est pas publié dans le dépôt.
+```bash
+cd ~/.config/precision-shell-git
+./scripts/sync-from-system.sh

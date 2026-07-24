@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import shlex
+import sys
+import tarfile
+import tempfile
+import urllib.parse
+import urllib.request
+from datetime import datetime
+from pathlib import Path
+
+HOME = Path.home()
+CONFIG_DIR = HOME / ".config" / "precision-shell"
+PREFS_PATH = CONFIG_DIR / "preferences.json"
+BACKUP_DIR = HOME / "Documents" / "PrecisionShell" / "backups"
+LOG_PATH = HOME / ".cache" / "precision-shell.log"
+
+DEFAULTS = {
+    "panel_opacity": 1.0,
+    "overlay_darkness": 0.32,
+    "default_view": 4,
+    "weather_location": "__WEATHER_LOCATION__",
+    "weather_latitude": 48.8014,
+    "weather_longitude": 2.1301,
+}
+
+
+def read_preferences() -> dict:
+    data = dict(DEFAULTS)
+    try:
+        loaded = json.loads(PREFS_PATH.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data.update(loaded)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    data["panel_opacity"] = min(1.0, max(0.90, float(data["panel_opacity"])))
+    data["overlay_darkness"] = min(0.65, max(0.22, float(data["overlay_darkness"])))
+    data["default_view"] = min(4, max(1, int(data["default_view"])))
+    data["weather_location"] = str(data["weather_location"]).strip() or "__WEATHER_LOCATION__"
+    data["weather_latitude"] = float(data["weather_latitude"])
+    data["weather_longitude"] = float(data["weather_longitude"])
+    return data
+
+
+def write_preferences(data: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix="preferences-", suffix=".json", dir=CONFIG_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary_name, PREFS_PATH)
+    finally:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+
+
+def set_value(key: str, raw_value: str) -> dict:
+    data = read_preferences()
+    if key == "panel_opacity":
+        data[key] = min(1.0, max(0.90, float(raw_value)))
+    elif key == "overlay_darkness":
+        data[key] = min(0.65, max(0.22, float(raw_value)))
+    elif key == "default_view":
+        data[key] = min(4, max(1, int(raw_value)))
+    else:
+        raise ValueError(f"Réglage inconnu : {key}")
+    write_preferences(data)
+    return data
+
+
+def set_city(query: str) -> dict:
+    query = query.strip()
+    if not query:
+        raise ValueError("Saisis une ville.")
+
+    url = (
+        "https://geocoding-api.open-meteo.com/v1/search?"
+        + urllib.parse.urlencode(
+            {
+                "name": query,
+                "count": 1,
+                "language": "fr",
+                "format": "json",
+            }
+        )
+    )
+    request = urllib.request.Request(url, headers={"User-Agent": "Precision-Shell/1.0"})
+    with urllib.request.urlopen(request, timeout=12) as response:
+        payload = json.load(response)
+
+    results = payload.get("results") or []
+    if not results:
+        raise ValueError(f"Ville introuvable : {query}")
+
+    result = results[0]
+    city = str(result.get("name") or query)
+    admin = str(result.get("admin1") or "")
+    country = str(result.get("country") or "")
+    label_parts = [city]
+    if admin and admin.lower() != city.lower():
+        label_parts.append(admin)
+    if country and country.lower() != "france":
+        label_parts.append(country)
+
+    data = read_preferences()
+    data["weather_location"] = ", ".join(label_parts)
+    data["weather_latitude"] = float(result["latitude"])
+    data["weather_longitude"] = float(result["longitude"])
+    write_preferences(data)
+    return data
+
+
+def run_detached(command: list[str]) -> None:
+    subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def create_backup() -> Path:
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    target = BACKUP_DIR / f"precision-shell-{stamp}.tar.gz"
+
+    candidates = [
+        HOME / ".config" / "quickshell" / "precision-shell",
+        HOME / ".config" / "niri" / "config.kdl",
+        HOME / ".config" / "precision-shell",
+        HOME / ".local" / "bin" / "precision-settings",
+        HOME / ".local" / "bin" / "precision-alt-release-watcher.py",
+    ]
+
+    with tarfile.open(target, "w:gz") as archive:
+        for candidate in candidates:
+            if candidate.exists():
+                try:
+                    archive.add(candidate, arcname=str(candidate.relative_to(HOME)))
+                except OSError:
+                    pass
+    return target
+
+
+def restart_shell() -> None:
+    script = (
+        "sleep 0.25; "
+        "pkill -f '(^|/)(qs|quickshell)([[:space:]]|$).*(precision-shell|/precision-shell/shell\\.qml)' 2>/dev/null || true; "
+        "sleep 0.45; "
+        f"nohup qs -c precision-shell >{shlex.quote(str(LOG_PATH))} 2>&1 &"
+    )
+    run_detached(["bash", "-lc", script])
+
+
+def action(name: str) -> str:
+    if name == "open-system-settings":
+        executable = "gnome-control-center"
+        run_detached([executable])
+        return "Réglages système ouverts."
+    if name == "backup":
+        target = create_backup()
+        return f"Sauvegarde créée : {target.name}"
+    if name == "open-backups":
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        run_detached(["gio", "open", str(BACKUP_DIR)])
+        return "Dossier des sauvegardes ouvert."
+    if name == "open-project":
+        project = HOME / "Documents" / "PrecisionShell"
+        project.mkdir(parents=True, exist_ok=True)
+        run_detached(["gio", "open", str(project)])
+        return "Dossier PrecisionShell ouvert."
+    if name == "validate-niri":
+        completed = subprocess.run(
+            ["niri", "validate"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=20,
+            check=False,
+        )
+        output = completed.stdout.strip()
+        if completed.returncode != 0:
+            raise RuntimeError(output or "Configuration Niri invalide.")
+        return output or "Configuration Niri valide."
+    if name == "restart-shell":
+        restart_shell()
+        return "Redémarrage de Precision Shell…"
+    if name == "lock":
+        precision_lock = HOME / ".local" / "bin" / "precision-lock"
+        if precision_lock.exists():
+            run_detached([str(precision_lock)])
+        else:
+            run_detached(["loginctl", "lock-session"])
+        return "Session verrouillée."
+    if name == "suspend":
+        run_detached(["systemctl", "suspend"])
+        return "Mise en veille…"
+    if name == "reboot":
+        run_detached(["systemctl", "reboot"])
+        return "Redémarrage…"
+    if name == "poweroff":
+        run_detached(["systemctl", "poweroff"])
+        return "Extinction…"
+    raise ValueError(f"Action inconnue : {name}")
+
+
+def main() -> int:
+    try:
+        command = sys.argv[1] if len(sys.argv) > 1 else "get"
+        if command == "get":
+            print(json.dumps(read_preferences(), ensure_ascii=False))
+        elif command == "set":
+            if len(sys.argv) != 4:
+                raise ValueError("Usage : precision-settings set clé valeur")
+            print(json.dumps(set_value(sys.argv[2], sys.argv[3]), ensure_ascii=False))
+        elif command == "set-city":
+            if len(sys.argv) != 3:
+                raise ValueError("Usage : precision-settings set-city ville")
+            print(json.dumps(set_city(sys.argv[2]), ensure_ascii=False))
+        elif command == "action":
+            if len(sys.argv) != 3:
+                raise ValueError("Usage : precision-settings action nom")
+            print(action(sys.argv[2]))
+        else:
+            raise ValueError(f"Commande inconnue : {command}")
+        return 0
+    except Exception as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec "/usr/bin/qs" -c precision-shell ipc call launcher toggle

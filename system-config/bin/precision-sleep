@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Empêche un double déclenchement de Super+L.
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/precision-sleep.lock"
+flock -n 9 || exit 0
+
+# swaylock --daemonize ne rend la main qu'après verrouillage effectif.
+if ! pgrep -x swaylock >/dev/null 2>&1; then
+    swaylock --daemonize
+fi
+
+systemctl suspend

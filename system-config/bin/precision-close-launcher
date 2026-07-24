@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+qs -c precision-shell ipc call launcher close >/dev/null 2>&1 || true
