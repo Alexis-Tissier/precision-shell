@@ -2983,7 +2983,7 @@ Rectangle {
                     "icon": "horizon.svg",
                     "desktopFile": "",
                     "lookup": "",
-                    "fallback": ["__HOME__/.local/bin/horizon"]
+                    "fallback": ["__HOME__/.local/bin/horizon", "open"]
                 }
 
             ]
@@ -4859,7 +4859,7 @@ Rectangle {
                     "icon": "horizon.svg",
                     "desktopFile": "",
                     "lookup": "",
-                    "fallback": ["__HOME__/.local/bin/horizon"]
+                    "fallback": ["__HOME__/.local/bin/horizon", "open"]
                 }
 
             ]
