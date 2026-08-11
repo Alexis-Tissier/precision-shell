@@ -20,6 +20,8 @@ rsync -a --delete \
   --exclude='wifi-cache.json' \
   --exclude='wallpaper.jpg' \
   --exclude='wallpaper.png' \
+  --exclude='.horizon-backup-*/' \
+  --exclude='.horizon-fix-backup-*/' \
   "$HOME/.config/quickshell/precision-shell/" \
   "$REPO_ROOT/system-config/quickshell/precision-shell/"
 
@@ -49,7 +51,8 @@ if [[ -d "$HOME/.local/share/applications" ]]; then
       -maxdepth 1 \
       -type f \
       \( -iname 'precision*.desktop' \
-         -o -iname 'darktable-ai.desktop' \) \
+         -o -iname 'darktable-ai.desktop' \
+         -o -iname 'horizon.desktop' \) \
       -exec cp {} "$REPO_ROOT/system-config/applications/" \;
 fi
 

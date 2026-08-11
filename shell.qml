@@ -3,6 +3,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 
 ShellRoot {
     id: root
@@ -11,10 +12,11 @@ ShellRoot {
     property bool launcherAllMode: false
     property bool dashboardOpen: false
     property bool dashboardWifiMenuOpen: false
+    property bool dashboardBluetoothMenuOpen: false
     property bool desktopWidgetsVisible: true
     property bool settingsOpen: false
-    property real panelOpacity: 1.0
-    property real overlayDarkness: 0.32
+    property real panelOpacity: 0.96
+    property real overlayDarkness: 0.16
     property int defaultViewState: 4
 
     function openSettings(section) {
@@ -126,7 +128,9 @@ function toggleLauncher() {
 }
 
     function openDashboard() {
+        // Lot 1: reset detail menus
         root.dashboardWifiMenuOpen = false
+        root.dashboardBluetoothMenuOpen = false
     settingsOpen = false
     if (root.launcherOpen) {
         root.closeLauncher()
@@ -134,10 +138,15 @@ function toggleLauncher() {
         launcherOpen = false
         dashboardOpen = true
         dashboardSearch.text = ""
+        // Lot 1: Super+D opens ready to type
+        Qt.callLater(function() {
+            dashboardSearch.forceActiveFocus()
+        })
     }
 
     function closeDashboard() {
         root.dashboardWifiMenuOpen = false
+        root.dashboardBluetoothMenuOpen = false
         dashboardOpen = false
         dashboardSearch.text = ""
         dashboardSearch.focus = false
@@ -164,7 +173,112 @@ function toggleLauncher() {
         })
     }
 
-    function switcherIcon(appId) {
+    function appIconSource(iconName, fallbackIcon) {
+        const icon = (iconName || "").trim()
+        const fallback = (fallbackIcon || "apps.svg").trim()
+
+        if (icon.length > 0) {
+            if (icon.indexOf("file:") === 0)
+                return encodeURI(icon)
+
+            if (icon.indexOf("/") === 0)
+                return encodeURI("file://" + icon)
+
+            const themedIcon = Quickshell.iconPath(icon, true)
+
+            if (themedIcon && themedIcon.length > 0)
+                return themedIcon
+
+            if (/\.(svg|png|jpe?g|webp|xpm)$/i.test(icon))
+                return Qt.resolvedUrl("icons/" + icon)
+        }
+
+        return Qt.resolvedUrl("icons/" + fallback)
+    }
+
+    function desktopEntryIcon(appId, title) {
+        let entry = null
+
+        if (appId && appId.length > 0)
+            entry = DesktopEntries.heuristicLookup(appId)
+
+        if (entry === null && title && title.length > 0)
+            entry = DesktopEntries.heuristicLookup(title)
+
+        return entry !== null && entry.icon
+            ? entry.icon
+            : ""
+    }
+
+    function applicationItemDesktopIcon(item) {
+        if (!item)
+            return ""
+
+        const candidates = []
+
+        function addCandidate(value) {
+            const candidate = String(value || "").trim()
+
+            if (candidate.length > 0
+                    && candidates.indexOf(candidate) === -1)
+                candidates.push(candidate)
+        }
+
+        addCandidate(item.desktopId)
+
+        if (item.desktopFile) {
+            const path = String(item.desktopFile)
+            const slash = path.lastIndexOf("/")
+            const fileName = slash >= 0
+                ? path.substring(slash + 1)
+                : path
+
+            addCandidate(fileName)
+
+            if (/\.desktop$/i.test(fileName))
+                addCandidate(fileName.replace(/\.desktop$/i, ""))
+        }
+
+        addCandidate(item.lookup)
+        addCandidate(item.title)
+
+        for (let index = 0; index < candidates.length; index++) {
+            const entry = DesktopEntries.heuristicLookup(candidates[index])
+
+            if (entry !== null
+                    && entry.icon
+                    && String(entry.icon).trim().length > 0)
+                return String(entry.icon).trim()
+        }
+
+        return ""
+    }
+
+    function enrichApplicationIcons(items) {
+        const enriched = []
+
+        for (let index = 0; index < items.length; index++) {
+            const item = Object.assign({}, items[index])
+            const listedIcon = String(item.icon || "").trim()
+            const resolvedIcon = applicationItemDesktopIcon(item)
+
+            if (!item.fallbackIcon
+                    || String(item.fallbackIcon).trim().length === 0) {
+                item.fallbackIcon = listedIcon.length > 0
+                    ? listedIcon
+                    : "apps.svg"
+            }
+
+            if (resolvedIcon.length > 0)
+                item.icon = resolvedIcon
+
+            enriched.push(item)
+        }
+
+        return enriched
+    }
+
+    function switcherFallbackIcon(appId) {
         const id = (appId || "").toLowerCase()
 
         if (id.indexOf("brave") !== -1
@@ -307,7 +421,13 @@ function toggleLauncher() {
                     windowData.title || ""
                 ),
                 "title": shortWindowTitle(windowData),
-                "icon": switcherIcon(windowData.app_id || ""),
+                "icon": desktopEntryIcon(
+                    windowData.app_id || "",
+                    windowData.title || ""
+                ),
+                "fallbackIcon": switcherFallbackIcon(
+                    windowData.app_id || ""
+                ),
                 "workspaceId": windowData.workspace_id
             })
         }
@@ -484,7 +604,7 @@ Qt.callLater(function() {
         function close(): void {
             root.cancelSwitcher()
         }
-    
+
 
         function confirm(): void {
             root.confirmSwitcher()
@@ -583,6 +703,9 @@ Qt.callLater(function() {
 
     function friendlyAppName(appId, title) {
         const id = (appId || "").toLowerCase()
+
+        if (id.indexOf("horizon") !== -1)
+            return "Horizon"
 
         if (id.indexOf("brave") !== -1)
             return "Brave"
@@ -947,7 +1070,7 @@ property int weatherCode: -1
 property bool weatherIsDay: true
 property string weatherSummary: "Updating..."
 property string weatherSymbol: "◌"
-property string weatherLocation: "Versailles"
+property string weatherLocation: "__WEATHER_LOCATION__"
 property real weatherLatitude: 48.8014
 property real weatherLongitude: 2.1301
 property date weatherUpdatedAt: new Date(0)
@@ -1060,43 +1183,494 @@ Timer {
 
         property var appItems: [
             {
-                "icon": "browser.svg",
+                "icon": "brave-browser",
+                "fallbackIcon": "browser.svg",
                 "title": "Brave",
-                "subtitle": "Internet",
+                "subtitle": "",
                 "lookup": "Brave",
                 "fallback": ["brave-browser"]
             },
             {
-                "icon": "files.svg",
+                "icon": "org.gnome.Nautilus",
+                "fallbackIcon": "files.svg",
                 "title": "Files",
-                "subtitle": "Documents",
+                "subtitle": "",
                 "lookup": "Files",
                 "fallback": ["nautilus"]
             },
             {
-                "icon": "terminal.svg",
+                "icon": "Alacritty",
+                "fallbackIcon": "terminal.svg",
                 "title": "Terminal",
-                "subtitle": "System",
-                "lookup": "Alacritty",
-                "fallback": ["alacritty"]
+                "subtitle": "",
+                "desktopFile": "__HOME__/.local/share/applications/precision-alacritty.desktop",
+                "lookup": "Precision Terminal",
+                "fallback": ["__HOME__/.local/bin/precision-alacritty"]
+            },
+            {
+                "icon": "org.gnome.Settings",
+                "fallbackIcon": "apps.svg",
+                "title": "Settings",
+                "subtitle": "",
+                "lookup": "Fedora Settings via Precision",
+                "fallback": ["__HOME__/.local/bin/precision-open-fedora-settings"],
+                "action": "fedora-settings"
+            }
+        ]
+
+
+        property var searchActionItems: [
+            {
+                "icon": "apps.svg",
+                "title": "Wi-Fi",
+                "subtitle": "Open wireless network settings",
+                "action": "command",
+                "command": [
+                    "bash",
+                    "-lc",
+                    "if command -v gnome-control-center >/dev/null 2>&1; then exec gnome-control-center wifi; elif command -v nm-connection-editor >/dev/null 2>&1; then exec nm-connection-editor; else notify-send \"Wi-Fi\" \"No network settings application found\"; fi"
+                ],
+                "keywords": "wifi wi fi wireless network internet reseau réseau connexion sans fil wlan",
+                "searchPriority": 90
             },
             {
                 "icon": "apps.svg",
-                "title": "Settings",
-                "subtitle": "Fedora",
-                "lookup": "Fedora Settings via Precision",
-                "fallback": ["/home/alexistissier/.local/bin/precision-open-fedora-settings"],
-                "action": "fedora-settings"
-            }
-        ,
+                "title": "Bluetooth",
+                "subtitle": "Open Bluetooth settings",
+                "action": "command",
+                "command": [
+                    "bash",
+                    "-lc",
+                    "if command -v gnome-control-center >/dev/null 2>&1; then exec gnome-control-center bluetooth; elif command -v blueman-manager >/dev/null 2>&1; then exec blueman-manager; else notify-send \"Bluetooth\" \"No Bluetooth settings application found\"; fi"
+                ],
+                "keywords": "bluetooth bt appareil devices casque ecouteurs écouteurs souris clavier",
+                "searchPriority": 90
+            },
             {
-                            "icon": "steam.svg",
-                            "title": "Steam",
-                            "subtitle": "Games",
-                            "lookup": "Steam",
-                            "fallback": ["/home/alexistissier/.local/bin/steam"]
-                        }
+                "icon": "apps.svg",
+                "title": "Appearance",
+                "subtitle": "Precision Shell appearance settings",
+                "action": "precision-settings",
+                "section": 0,
+                "keywords": "appearance apparence theme thème wallpaper fond ecran écran couleur style",
+                "searchPriority": 72
+            },
+            {
+                "icon": "apps.svg",
+                "title": "System",
+                "subtitle": "Precision Shell system settings",
+                "action": "precision-settings",
+                "section": 1,
+                "keywords": "system système parametres paramètres settings configuration",
+                "searchPriority": 70
+            },
+            {
+                "icon": "apps.svg",
+                "title": "Shortcuts",
+                "subtitle": "Keyboard shortcuts",
+                "action": "precision-settings",
+                "section": 2,
+                "keywords": "shortcuts raccourcis clavier touches keyboard hotkeys",
+                "searchPriority": 70
+            },
+            {
+                "icon": "apps.svg",
+                "title": "Session & power",
+                "subtitle": "Lock, suspend and session settings",
+                "action": "precision-settings",
+                "section": 3,
+                "keywords": "session power alimentation eteindre éteindre shutdown reboot redemarrer redémarrer veille suspend logout deconnexion déconnexion",
+                "searchPriority": 76
+            },
+            {
+                "icon": "apps.svg",
+                "title": "Lock screen",
+                "subtitle": "Lock the current session",
+                "action": "command",
+                "command": ["loginctl", "lock-session"],
+                "keywords": "lock verrouiller verrouillage ecran écran session",
+                "searchPriority": 80
+            },
+            {
+                "icon": "apps.svg",
+                "title": "Suspend",
+                "subtitle": "Put the computer to sleep",
+                "action": "command",
+                "command": ["systemctl", "suspend"],
+                "keywords": "suspend sleep veille dormir ordinateur",
+                "searchPriority": 78
+            },
+            {
+                "icon": "apps.svg",
+                "title": "Screenshot",
+                "subtitle": "Capture a selected area",
+                "action": "command",
+                "command": ["niri", "msg", "action", "screenshot"],
+                "keywords": "screenshot capture ecran écran image print screen selection zone",
+                "searchPriority": 74
+            },
+            {
+                "icon": "apps.svg",
+                "title": "Task Manager",
+                "subtitle": "Open the system monitor",
+                "action": "command",
+                "command": [
+                    "bash",
+                    "-lc",
+                    "if command -v gnome-system-monitor >/dev/null 2>&1; then exec gnome-system-monitor; else exec precision-alacritty -e sh -lc 'top; exec sh'; fi"
+                ],
+                "keywords": "task manager gestionnaire taches tâches processus cpu ram memoire mémoire system monitor",
+                "searchPriority": 72
+            }
         ]
+
+        property var searchAliases: ({
+            "internet": ["brave", "browser", "web", "navigateur"],
+            "web": ["brave", "browser", "internet", "navigateur"],
+            "navigateur": ["brave", "browser", "internet", "web"],
+            "fichier": ["files", "nautilus", "fichiers", "dossier"],
+            "fichiers": ["files", "nautilus", "fichier", "dossier"],
+            "dossier": ["files", "nautilus", "fichiers"],
+            "explorateur": ["files", "nautilus", "fichiers"],
+            "parametre": ["settings", "reglages", "configuration"],
+            "parametres": ["settings", "reglages", "configuration"],
+            "reglage": ["settings", "parametres", "configuration"],
+            "reglages": ["settings", "parametres", "configuration"],
+            "terminal": ["alacritty", "ptyxis", "console", "shell"],
+            "console": ["terminal", "alacritty", "ptyxis", "shell"],
+            "photo": ["darktable", "image", "photographie"],
+            "photos": ["darktable", "image", "photographie"],
+            "image": ["photo", "darktable", "graphisme"],
+            "code": ["editor", "developpement", "programmation"],
+            "editeur": ["editor", "code", "texte"],
+            "wifi": ["wireless", "network", "reseau", "internet"],
+            "reseau": ["network", "wifi", "wireless", "internet"],
+            "bluetooth": ["bt", "devices", "appareil"],
+            "capture": ["screenshot", "ecran", "image"],
+            "verrouiller": ["lock", "verrouillage", "session"],
+            "veille": ["suspend", "sleep"],
+            "eteindre": ["shutdown", "power", "session"],
+            "redemarrer": ["reboot", "restart", "session"]
+        })
+
+        property var searchUsage: ({})
+
+        function normalizeSearch(value) {
+            return String(value || "")
+                .toLowerCase()
+                .replace(/[àáâãäå]/g, "a")
+                .replace(/[ç]/g, "c")
+                .replace(/[èéêë]/g, "e")
+                .replace(/[ìíîï]/g, "i")
+                .replace(/[ñ]/g, "n")
+                .replace(/[òóôõö]/g, "o")
+                .replace(/[ùúûü]/g, "u")
+                .replace(/[ýÿ]/g, "y")
+                .replace(/[œ]/g, "oe")
+                .replace(/[æ]/g, "ae")
+                .replace(/[^a-z0-9]+/g, " ")
+                .trim()
+        }
+
+        function searchWords(value) {
+            const normalized = normalizeSearch(value)
+            return normalized.length > 0
+                ? normalized.split(/\s+/)
+                : []
+        }
+
+        function searchItemKey(item) {
+            if (item.desktopFile)
+                return "desktop:" + item.desktopFile
+
+            if (item.action)
+                return "action:" + item.action
+                    + ":" + (item.section !== undefined ? item.section : "")
+                    + ":" + (item.title || "")
+
+            return "item:" + (item.lookup || item.title || "")
+        }
+
+        function recordSearchUse(item) {
+            const key = searchItemKey(item)
+            searchUsage[key] = (searchUsage[key] || 0) + 1
+        }
+
+        function levenshteinDistance(left, right) {
+            if (left === right)
+                return 0
+            if (left.length === 0)
+                return right.length
+            if (right.length === 0)
+                return left.length
+
+            let previous = []
+            let current = []
+
+            for (let column = 0; column <= right.length; column++)
+                previous[column] = column
+
+            for (let row = 1; row <= left.length; row++) {
+                current = [row]
+
+                for (let column = 1; column <= right.length; column++) {
+                    const cost = left.charAt(row - 1) === right.charAt(column - 1)
+                        ? 0
+                        : 1
+
+                    current[column] = Math.min(
+                        current[column - 1] + 1,
+                        previous[column] + 1,
+                        previous[column - 1] + cost
+                    )
+                }
+
+                previous = current
+            }
+
+            return previous[right.length]
+        }
+
+        function wordMatchScore(queryWord, targetWord) {
+            if (!queryWord || !targetWord)
+                return -1
+            if (targetWord === queryWord)
+                return 210
+            if (targetWord.indexOf(queryWord) === 0)
+                return 170
+            if (targetWord.indexOf(queryWord) !== -1)
+                return 125
+            if (queryWord.length < 3)
+                return -1
+
+            const maximumDistance = queryWord.length >= 7 ? 2 : 1
+
+            if (Math.abs(targetWord.length - queryWord.length) > maximumDistance)
+                return -1
+
+            const distance = levenshteinDistance(queryWord, targetWord)
+
+            return distance <= maximumDistance
+                ? 92 - distance * 22
+                : -1
+        }
+
+        function queryVariants(word) {
+            const variants = [word]
+            const aliases = searchAliases[word] || []
+
+            for (let index = 0; index < aliases.length; index++) {
+                const normalized = normalizeSearch(aliases[index])
+
+                if (normalized.length > 0
+                        && variants.indexOf(normalized) === -1)
+                    variants.push(normalized)
+            }
+
+            return variants
+        }
+
+        function itemSearchFields(item) {
+            const title = normalizeSearch(item.title)
+            const subtitle = normalizeSearch(item.subtitle)
+            const lookup = normalizeSearch(item.lookup)
+            const metadata = normalizeSearch(
+                [
+                    item.genericName,
+                    item.comment,
+                    item.keywords,
+                    item.categories,
+                    item.exec,
+                    item.searchText
+                ].join(" ")
+            )
+
+            return {
+                "title": title,
+                "subtitle": subtitle,
+                "lookup": lookup,
+                "titleWords": searchWords(title),
+                "allWords": searchWords(
+                    [title, subtitle, lookup, metadata].join(" ")
+                )
+            }
+        }
+
+        function scoreSearchItem(item, rawQuery) {
+            const query = normalizeSearch(rawQuery)
+
+            if (query.length === 0)
+                return 0
+
+            const fields = itemSearchFields(item)
+            const queryWords = searchWords(query)
+            let score = Number(item.searchPriority || 0)
+
+            if (fields.title === query)
+                score += 1500
+            else if (fields.title.indexOf(query) === 0)
+                score += 1120
+            else if (fields.title.indexOf(query) !== -1)
+                score += 760
+
+            if (fields.lookup === query)
+                score += 900
+            else if (fields.lookup.indexOf(query) === 0)
+                score += 620
+
+            for (let queryIndex = 0; queryIndex < queryWords.length; queryIndex++) {
+                const variants = queryVariants(queryWords[queryIndex])
+                let bestScore = -1
+
+                for (let variantIndex = 0; variantIndex < variants.length; variantIndex++) {
+                    const synonymPenalty = variantIndex === 0 ? 0 : 28
+
+                    for (let wordIndex = 0; wordIndex < fields.allWords.length; wordIndex++) {
+                        const candidateScore = wordMatchScore(
+                            variants[variantIndex],
+                            fields.allWords[wordIndex]
+                        )
+
+                        if (candidateScore >= 0)
+                            bestScore = Math.max(
+                                bestScore,
+                                candidateScore - synonymPenalty
+                            )
+                    }
+                }
+
+                if (bestScore < 0)
+                    return -1
+
+                score += bestScore
+            }
+
+            if (queryWords.length > 0) {
+                for (let index = 0; index < fields.titleWords.length; index++) {
+                    if (fields.titleWords[index] === queryWords[0]) {
+                        score += 130
+                        break
+                    }
+                }
+            }
+
+            score += Math.min(
+                120,
+                (searchUsage[searchItemKey(item)] || 0) * 18
+            )
+
+            return score
+        }
+
+        function isPinnedSearchItem(item) {
+            const key = searchItemKey(item)
+
+            for (let index = 0; index < appItems.length; index++) {
+                if (searchItemKey(appItems[index]) === key)
+                    return true
+            }
+
+            return false
+        }
+
+        function smartSearchItems(rawQuery, limit, allWhenEmpty) {
+            const query = normalizeSearch(rawQuery)
+
+            if (query.length === 0)
+                return allWhenEmpty ? allAppItems : appItems
+
+            const pool = []
+            const seen = ({})
+            const sources = [appItems, searchActionItems, allAppItems]
+
+            for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex++) {
+                const source = sources[sourceIndex]
+
+                for (let itemIndex = 0; itemIndex < source.length; itemIndex++) {
+                    const item = source[itemIndex]
+                    const key = searchItemKey(item)
+
+                    if (!seen[key]) {
+                        seen[key] = true
+                        pool.push(item)
+                    }
+                }
+            }
+
+            const scored = []
+
+            for (let index = 0; index < pool.length; index++) {
+                const item = pool[index]
+                let score = scoreSearchItem(item, query)
+
+                if (score < 0)
+                    continue
+
+                if (isPinnedSearchItem(item))
+                    score += 46
+
+                scored.push({
+                    "item": item,
+                    "score": score
+                })
+            }
+
+            scored.sort(function(left, right) {
+                if (right.score !== left.score)
+                    return right.score - left.score
+
+                return String(left.item.title || "").localeCompare(
+                    String(right.item.title || "")
+                )
+            })
+
+            const results = scored.map(function(entry) {
+                return entry.item
+            })
+
+            return limit > 0
+                ? results.slice(0, limit)
+                : results
+        }
+
+        function executeSearchAction(item) {
+            if (!item)
+                return false
+
+            if (item.action === "precision-settings") {
+                root.openSettings(
+                    item.section !== undefined
+                        ? item.section
+                        : 0
+                )
+                return true
+            }
+
+            if (item.action === "fedora-settings") {
+                Quickshell.execDetached({
+                    command: [
+                        "__HOME__/.local/bin/precision-open-fedora-settings"
+                    ]
+                })
+                root.closeLauncher()
+                root.closeDashboard()
+                return true
+            }
+
+            if (item.action === "command"
+                    && item.command
+                    && item.command.length > 0) {
+                root.closeLauncher()
+                root.closeDashboard()
+
+                Quickshell.execDetached({
+                    command: item.command
+                })
+                return true
+            }
+
+            return false
+        }
 
         property var allAppItems: []
         property bool allAppsLoaded: false
@@ -1130,7 +1704,7 @@ Process {
     command: [
         "bash",
         "-lc",
-        "$HOME/.local/bin/precision-list-apps"
+        "$HOME/.local/bin/precision-list-apps-safe"
     ]
 
     stdout: StdioCollector {
@@ -1138,7 +1712,7 @@ Process {
             try {
                 const parsed = JSON.parse(text)
                 if (Array.isArray(parsed)) {
-                    desktop.allAppItems = parsed
+                    desktop.allAppItems = root.enrichApplicationIcons(parsed)
                     desktop.allAppsLoaded = true
                 }
             } catch (error) {
@@ -1149,64 +1723,40 @@ Process {
 }
 
                 function filteredAppItems() {
-            const query = searchInput.text.trim().toLowerCase()
-
-            if (query.length === 0)
-                return appItems
-
-            const matches = allAppItems.filter(function(item) {
-                const title = (item.title || "").toLowerCase()
-                const subtitle = (item.subtitle || "").toLowerCase()
-                const lookup = (item.lookup || "").toLowerCase()
-
-                return title.indexOf(query) !== -1
-                    || subtitle.indexOf(query) !== -1
-                    || lookup.indexOf(query) !== -1
-            })
-
-            return matches.slice(0, 4)
+            return desktop.smartSearchItems(
+                searchInput.text,
+                4,
+                false
+            )
         }
 
         function launchApplication(item) {
-    if (item.action === "fedora-settings") {
-        Quickshell.execDetached({
-            command: ["/home/alexistissier/.local/bin/precision-open-fedora-settings"]
-        })
-        root.closeLauncher()
-        root.closeDashboard()
-        return
-    }
+            desktop.recordSearchUse(item)
+            const handled = desktop.executeSearchAction(item)
 
+            if (!handled) {
+                if (item.desktopFile && item.desktopFile.length > 0) {
+                    Quickshell.execDetached({
+                        command: ["gio", "launch", item.desktopFile]
+                    })
+                } else {
+                    const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
 
-    if (item.action === "precision-settings") {
-        root.openSettings(0)
-        return
-    }
-            if (item.desktopFile && item.desktopFile.length > 0) {
-        Quickshell.execDetached({
-            command: ["gio", "launch", item.desktopFile]
-        })
-    } else {
-        const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
-
-        if (desktopEntry !== null) {
-            desktopEntry.execute()
-        } else {
-            Quickshell.execDetached({
-                command: item.fallback
-            })
-        }
-    }
+                    if (desktopEntry !== null) {
+                        desktopEntry.execute()
+                    } else if (item.fallback && item.fallback.length > 0) {
+                        Quickshell.execDetached({
+                            command: item.fallback
+                        })
+                    }
+                }
+            }
 
             searchInput.text = ""
             searchInput.focus = false
             restoreWidgetsOnFocus = false
             wifiMenuOpen = false
             bluetoothMenuOpen = false
-
-            // The desktop lives on the Wayland Bottom layer. Normal Niri
-            // windows cover it, and the widgets become visible again as soon
-            // as the workspace is empty.
             viewState = 4
         }
 
@@ -1855,7 +2405,7 @@ Process {
                 return
 
             wifiScanning = true
-            wifiMessage = "Scanning..."
+            wifiMessage = ""
             wifiScanner.running = true
         }
 
@@ -2017,12 +2567,21 @@ Process {
             context: Qt.ApplicationShortcut
             sequence: "Escape"
             onActivated: {
-                if (desktop.wifiMenuOpen)
+                if (root.dashboardWifiMenuOpen
+                        || root.dashboardBluetoothMenuOpen) {
+                    root.dashboardWifiMenuOpen = false
+                    root.dashboardBluetoothMenuOpen = false
+                } else if (root.dashboardOpen) {
+                    root.closeDashboard()
+                } else if (root.launcherOpen) {
+                    root.closeLauncher()
+                } else if (desktop.wifiMenuOpen) {
                     desktop.wifiMenuOpen = false
-                else if (desktop.bluetoothMenuOpen)
+                } else if (desktop.bluetoothMenuOpen) {
                     desktop.bluetoothMenuOpen = false
-                else
+                } else {
                     desktop.viewState = 1
+                }
             }
         }
 
@@ -2310,7 +2869,41 @@ Column {
 }
 
 Rectangle {
+    id: libraryPanelShadowSource
+    x: libraryPanel.x
+    y: libraryPanel.y
+    width: libraryPanel.width
+    height: libraryPanel.height
+    radius: libraryPanel.radius
+    scale: libraryPanel.scale
+    visible: false
+    layer.enabled: true
+}
+
+MultiEffect {
+    source: libraryPanelShadowSource
+    anchors.fill: libraryPanelShadowSource
+    z: 2
+    visible: libraryPanel.opened
+    autoPaddingEnabled: true
+    shadowEnabled: true
+    shadowColor: "#60000000"
+    shadowOpacity: 0.22
+    shadowBlur: 1.0
+    blurMax: 30
+    shadowHorizontalOffset: 0
+    shadowVerticalOffset: desktop.p(5)
+    shadowScale: 1.01
+    opacity: libraryPanel.opened ? 1 : 0
+    Behavior on opacity {
+        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+    }
+}
+
+Rectangle {
     id: libraryPanel
+
+    z: 3
 
     property bool opened: desktop.viewState === 4
         && root.desktopWidgetsVisible
@@ -2324,7 +2917,7 @@ Rectangle {
     }
 
     width: desktop.p(150)
-    height: desktop.p(160)
+    height: desktop.p(214)
     radius: desktop.p(10)
     color: desktop.panelSurface
     border.width: Math.max(1, desktop.p(0.7))
@@ -2356,25 +2949,43 @@ Rectangle {
             model: [
                 {
                     "title": "Atlas Portfolio",
-                    "icon": "apps.svg",
+                    "icon": "atlas-portfolio",
+                    "fallbackIcon": "apps.svg",
                     "desktopFile": "/usr/share/applications/Atlas Portfolio.desktop",
                     "lookup": "Atlas Portfolio",
                     "fallback": ["atlas-portfolio"]
                 },
                 {
                     "title": "darktable AI",
-                    "icon": "darktable.svg",
-                    "desktopFile": "/home/alexistissier/.local/share/applications/darktable-ai.desktop",
+                    "icon": "darktable-ai",
+                    "fallbackIcon": "darktable.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/darktable-ai.desktop",
                     "lookup": "darktable AI",
-                    "fallback": ["/home/alexistissier/.local/bin/darktable-ai"]
+                    "fallback": ["__HOME__/.local/bin/darktable-ai"]
                 },
                 {
-                    "title": "Precision Settings",
-                    "icon": "apps.svg",
-                    "desktopFile": "/home/alexistissier/.local/share/applications/precision-settings.desktop",
-                    "lookup": "Precision Settings",
-                    "fallback": ["/home/alexistissier/.local/bin/precision-settings"]
+                    "title": "Détour",
+                    "icon": "detour",
+                    "fallbackIcon": "apps.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/precision-settings.desktop",
+                    "lookup": "Détour",
+                    "fallback": ["__HOME__/.local/bin/precision-settings"]
+                },
+                {
+                    "title": "Libris",
+                    "icon": "libris-menu.png",
+                    "desktopFile": "",
+                    "lookup": "Libris",
+                    "fallback": ["libris"]
+                },
+                {
+                    "title": "Horizon",
+                    "icon": "horizon.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/horizon.desktop",
+                    "lookup": "Horizon",
+                    "fallback": ["__HOME__/.local/bin/horizon"]
                 }
+
             ]
 
             delegate: Item {
@@ -2392,16 +3003,19 @@ Rectangle {
                         : "transparent"
                 }
 
-                PremiumIcon {
+                AppIcon {
                     id: libPinnedIcon
                     anchors {
                         left: parent.left
                         leftMargin: desktop.p(1)
                         verticalCenter: parent.verticalCenter
                     }
-                    source: Qt.resolvedUrl("icons/" + modelData.icon)
-                    size: desktop.p(12)
-                    iconOpacity: 0.82
+                    source: root.appIconSource(
+                        modelData.icon,
+                        modelData.fallbackIcon
+                    )
+                    size: modelData.title === "Libris" ? desktop.p(14) : desktop.p(12)
+                    iconOpacity: 0.92
                 }
 
                 Text {
@@ -2424,6 +3038,7 @@ Rectangle {
                     id: libPinnedMouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    enabled: modelData.available !== false
                     cursorShape: Qt.PointingHandCursor
                     onClicked: desktop.launchPinnedApplication(
                         modelData.desktopFile,
@@ -2490,7 +3105,41 @@ Item {
 }
 
             Rectangle {
+    id: commandPaletteShadowSource
+    x: commandPalette.x
+    y: commandPalette.y
+    width: commandPalette.width
+    height: commandPalette.height
+    radius: commandPalette.radius
+    scale: commandPalette.scale
+    visible: false
+    layer.enabled: true
+}
+
+MultiEffect {
+    source: commandPaletteShadowSource
+    anchors.fill: commandPaletteShadowSource
+    z: 2
+    visible: commandPalette.opened
+    autoPaddingEnabled: true
+    shadowEnabled: true
+    shadowColor: "#60000000"
+    shadowOpacity: 0.22
+    shadowBlur: 1.0
+    blurMax: 30
+    shadowHorizontalOffset: 0
+    shadowVerticalOffset: desktop.p(5)
+    shadowScale: 1.01
+    opacity: commandPalette.opened ? 1 : 0
+    Behavior on opacity {
+        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+    }
+}
+
+Rectangle {
                 id: commandPalette
+
+    z: 3
 
                 property bool opened: (desktop.viewState === 2 || desktop.viewState === 4) && root.desktopWidgetsVisible && !root.workspaceHasWindows
 
@@ -2501,7 +3150,7 @@ Item {
                 }
 
                 width: desktop.p(438)
-                height: desktop.p(123)
+                height: desktop.p(106)
                 radius: desktop.p(10)
 
                 color: desktop.panelSurface
@@ -2534,7 +3183,7 @@ Item {
                         right: parent.right
                     }
 
-                    height: desktop.p(45)
+                    height: desktop.p(40)
 
                     PremiumIcon {
                         anchors {
@@ -2618,7 +3267,7 @@ Item {
                         left: parent.left
                         right: parent.right
                         top: parent.top
-                        topMargin: desktop.p(45)
+                        topMargin: desktop.p(40)
                     }
 
                     height: Math.max(1, desktop.p(0.7))
@@ -2633,7 +3282,7 @@ Item {
                     }
 
                     visible: desktop.filteredAppItems().length === 0
-                    text: "No matching application"
+                    text: "No matching application or command"
                     color: desktop.mutedInk
                     font.family: "Inter"
                     font.pixelSize: desktop.p(8)
@@ -2643,7 +3292,7 @@ Item {
                     anchors {
                         horizontalCenter: parent.horizontalCenter
                         bottom: parent.bottom
-                        bottomMargin: desktop.p(12)
+                        bottomMargin: desktop.p(8)
                     }
 
                     spacing: desktop.p(31)
@@ -2655,7 +3304,7 @@ Item {
                             id: appTile
 
                             width: desktop.p(64)
-                            height: desktop.p(56)
+                            height: desktop.p(46)
 
                             Rectangle {
                                 anchors {
@@ -2680,13 +3329,16 @@ Item {
 
                             Column {
                                 anchors.centerIn: parent
-                                spacing: desktop.p(3)
+                                spacing: desktop.p(2)
 
-                                PremiumIcon {
+                                AppIcon {
                                     anchors.horizontalCenter: parent.horizontalCenter
-                                    source: Qt.resolvedUrl("icons/" + modelData.icon)
-                                    size: desktop.p(20)
-                                    iconOpacity: tileMouse.containsMouse ? 1.0 : 0.88
+                                    source: root.appIconSource(
+                                        modelData.icon,
+                                        modelData.fallbackIcon
+                                    )
+                                    size: desktop.p(18)
+                                    iconOpacity: tileMouse.containsMouse ? 1.0 : 0.96
                                 }
 
                                 Text {
@@ -2698,13 +3350,6 @@ Item {
                                     font.weight: Font.Normal
                                 }
 
-                                Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    text: modelData.subtitle
-                                    color: desktop.mutedInk
-                                    font.family: "Inter"
-                                    font.pixelSize: desktop.p(7.2)
-                                }
                             }
 
                             MouseArea {
@@ -2721,7 +3366,41 @@ Item {
             }
 
             Rectangle {
+    id: settingsPanelShadowSource
+    x: settingsPanel.x
+    y: settingsPanel.y
+    width: settingsPanel.width
+    height: settingsPanel.height
+    radius: settingsPanel.radius
+    scale: settingsPanel.scale
+    visible: false
+    layer.enabled: true
+}
+
+MultiEffect {
+    source: settingsPanelShadowSource
+    anchors.fill: settingsPanelShadowSource
+    z: 2
+    visible: settingsPanel.opened
+    autoPaddingEnabled: true
+    shadowEnabled: true
+    shadowColor: "#60000000"
+    shadowOpacity: 0.22
+    shadowBlur: 1.0
+    blurMax: 30
+    shadowHorizontalOffset: 0
+    shadowVerticalOffset: desktop.p(5)
+    shadowScale: 1.01
+    opacity: settingsPanel.opened ? 1 : 0
+    Behavior on opacity {
+        NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+    }
+}
+
+Rectangle {
                 id: settingsPanel
+
+    z: 3
 
                 property bool opened: (desktop.viewState === 3 || desktop.viewState === 4) && root.desktopWidgetsVisible && !root.workspaceHasWindows
 
@@ -3364,7 +4043,7 @@ PrecisionSessionRow {
     graphite: desktop.graphite
     softInk: desktop.softInk
     mutedInk: desktop.mutedInk
-    helperPath: "/home/alexistissier/.local/bin/precision-session-action"
+    helperPath: "__HOME__/.local/bin/precision-session-action"
 }
                 }
             }
@@ -3842,7 +4521,9 @@ PrecisionSessionRow {
                         height: desktop.p(88)
                         clip: true
                         spacing: desktop.p(1)
-                        model: desktop.wifiNetworks
+                        model: desktop.wifiNetworks.filter(function(network) {
+                            return !network.connected
+                        })
                         interactive: contentHeight > height
                         visible: desktop.wifiEnabled
 
@@ -3972,63 +4653,42 @@ PrecisionSessionRow {
         focusable: true
 
         WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
         WlrLayershell.namespace: "precision-shell-dashboard"
 
         color: Qt.rgba(0, 0, 0, root.overlayDarkness)
         function filteredItems() {
-            const query = dashboardSearch.text.trim().toLowerCase()
-            const baseItems = query.length > 0 ? desktop.allAppItems : desktop.appItems
-
-            if (query.length === 0)
-                return baseItems
-
-            const matches = baseItems.filter(function(item) {
-                const title = (item.title || "").toLowerCase()
-                const subtitle = (item.subtitle || "").toLowerCase()
-                const lookup = (item.lookup || "").toLowerCase()
-
-                return title.indexOf(query) !== -1
-                    || subtitle.indexOf(query) !== -1
-                    || lookup.indexOf(query) !== -1
-            })
-
-            return matches.slice(0, 4)
+            return desktop.smartSearchItems(
+                dashboardSearch.text,
+                4,
+                false
+            )
         }
 
         function launchItem(item) {
-    if (item.action === "fedora-settings") {
-        Quickshell.execDetached({
-            command: ["/home/alexistissier/.local/bin/precision-open-fedora-settings"]
-        })
-        root.closeLauncher()
-        root.closeDashboard()
-        return
-    }
+            desktop.recordSearchUse(item)
+            const handled = desktop.executeSearchAction(item)
 
+            if (!handled) {
+                if (item.desktopFile && item.desktopFile.length > 0) {
+                    Quickshell.execDetached({
+                        command: ["gio", "launch", item.desktopFile]
+                    })
+                } else {
+                    const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
 
-    if (item.action === "precision-settings") {
-        root.openSettings(0)
-        return
-    }
-            const desktopEntry = DesktopEntries.heuristicLookup(item.lookup)
-
-            if (desktopEntry !== null) {
-                desktopEntry.execute()
-            } else {
-                Quickshell.execDetached({
-                    command: item.fallback
-                })
+                    if (desktopEntry !== null) {
+                        desktopEntry.execute()
+                    } else if (item.fallback && item.fallback.length > 0) {
+                        Quickshell.execDetached({
+                            command: item.fallback
+                        })
+                    }
+                }
             }
 
+            dashboardSearch.text = ""
             root.closeDashboard()
-        }
-
-        Shortcut {
-            enabled: root.dashboardOpen
-            context: Qt.ApplicationShortcut
-            sequence: "Escape"
-            onActivated: root.closeDashboard()
         }
 
         MouseArea {
@@ -4137,7 +4797,7 @@ Rectangle {
     }
 
     width: desktop.p(150)
-    height: desktop.p(160)
+    height: desktop.p(214)
     radius: desktop.p(10)
     color: desktop.panelSurface
     border.width: Math.max(1, desktop.p(0.7))
@@ -4165,25 +4825,43 @@ Rectangle {
             model: [
                 {
                     "title": "Atlas Portfolio",
-                    "icon": "apps.svg",
+                    "icon": "atlas-portfolio",
+                    "fallbackIcon": "apps.svg",
                     "desktopFile": "/usr/share/applications/Atlas Portfolio.desktop",
                     "lookup": "Atlas Portfolio",
                     "fallback": ["atlas-portfolio"]
                 },
                 {
                     "title": "darktable AI",
-                    "icon": "darktable.svg",
-                    "desktopFile": "/home/alexistissier/.local/share/applications/darktable-ai.desktop",
+                    "icon": "darktable-ai",
+                    "fallbackIcon": "darktable.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/darktable-ai.desktop",
                     "lookup": "darktable AI",
-                    "fallback": ["/home/alexistissier/.local/bin/darktable-ai"]
+                    "fallback": ["__HOME__/.local/bin/darktable-ai"]
                 },
                 {
-                    "title": "Precision Settings",
-                    "icon": "apps.svg",
-                    "desktopFile": "/home/alexistissier/.local/share/applications/precision-settings.desktop",
-                    "lookup": "Precision Settings",
-                    "fallback": ["/home/alexistissier/.local/bin/precision-settings"]
+                    "title": "Détour",
+                    "icon": "detour",
+                    "fallbackIcon": "apps.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/precision-settings.desktop",
+                    "lookup": "Détour",
+                    "fallback": ["__HOME__/.local/bin/precision-settings"]
+                },
+                {
+                    "title": "Libris",
+                    "icon": "libris-menu.png",
+                    "desktopFile": "",
+                    "lookup": "Libris",
+                    "fallback": ["libris"]
+                },
+                {
+                    "title": "Horizon",
+                    "icon": "horizon.svg",
+                    "desktopFile": "__HOME__/.local/share/applications/horizon.desktop",
+                    "lookup": "Horizon",
+                    "fallback": ["__HOME__/.local/bin/horizon"]
                 }
+
             ]
 
             delegate: Item {
@@ -4201,16 +4879,19 @@ Rectangle {
                         : "transparent"
                 }
 
-                PremiumIcon {
+                AppIcon {
                     id: dashLibPinnedIcon
                     anchors {
                         left: parent.left
                         leftMargin: desktop.p(1)
                         verticalCenter: parent.verticalCenter
                     }
-                    source: Qt.resolvedUrl("icons/" + modelData.icon)
-                    size: desktop.p(12)
-                    iconOpacity: 0.82
+                    source: root.appIconSource(
+                        modelData.icon,
+                        modelData.fallbackIcon
+                    )
+                    size: modelData.title === "Libris" ? desktop.p(14) : desktop.p(12)
+                    iconOpacity: 0.92
                 }
 
                 Text {
@@ -4233,6 +4914,7 @@ Rectangle {
                     id: dashLibPinnedMouse
                     anchors.fill: parent
                     hoverEnabled: true
+                    enabled: modelData.available !== false
                     cursorShape: Qt.PointingHandCursor
                     onClicked: desktop.launchPinnedApplication(
                         modelData.desktopFile,
@@ -4298,8 +4980,42 @@ Item {
     }
 }
 
-        Rectangle {
+                Rectangle {
+            id: dashboardPaletteShadowSource
+
+            x: dashboardPalette.x
+            y: dashboardPalette.y
+            width: dashboardPalette.width
+            height: dashboardPalette.height
+            radius: dashboardPalette.radius
+            scale: dashboardPalette.scale
+
+            visible: false
+            layer.enabled: true
+        }
+
+        MultiEffect {
+            source: dashboardPaletteShadowSource
+            anchors.fill: dashboardPaletteShadowSource
+            z: 2
+
+            visible: root.dashboardOpen
+            autoPaddingEnabled: true
+
+            shadowEnabled: true
+            shadowColor: "#65000000"
+            shadowOpacity: 0.24
+            shadowBlur: 1.0
+            blurMax: 34
+            shadowHorizontalOffset: 0
+            shadowVerticalOffset: desktop.p(5)
+            shadowScale: 1.01
+        }
+
+Rectangle {
             id: dashboardPalette
+
+            z: 3
 
             anchors {
                 horizontalCenter: parent.horizontalCenter
@@ -4308,13 +5024,31 @@ Item {
             }
 
             width: desktop.p(438)
-            height: desktop.p(123)
+            height: desktop.p(106)
             radius: desktop.p(10)
 
             color: desktop.panelSurface
             border.width: Math.max(1, desktop.p(0.7))
             border.color: desktop.panelBorder
             clip: true
+
+            opacity: root.dashboardOpen ? 1 : 0
+            scale: root.dashboardOpen ? 1 : 0.975
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 155
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 180
+                    easing.type: Easing.OutBack
+                    easing.overshoot: 0.55
+                }
+            }
 
             MouseArea {
                 anchors.fill: parent
@@ -4332,7 +5066,7 @@ Item {
                     right: parent.right
                 }
 
-                height: desktop.p(45)
+                height: desktop.p(40)
 
                 PremiumIcon {
                     anchors {
@@ -4415,7 +5149,7 @@ Item {
                     left: parent.left
                     right: parent.right
                     top: parent.top
-                    topMargin: desktop.p(45)
+                    topMargin: desktop.p(40)
                 }
 
                 height: Math.max(1, desktop.p(0.7))
@@ -4426,7 +5160,7 @@ Item {
                 anchors {
                     horizontalCenter: parent.horizontalCenter
                     bottom: parent.bottom
-                    bottomMargin: desktop.p(12)
+                    bottomMargin: desktop.p(8)
                 }
 
                 spacing: desktop.p(31)
@@ -4440,7 +5174,15 @@ Item {
                         required property var modelData
 
                         width: desktop.p(64)
-                        height: desktop.p(56)
+                        height: desktop.p(46)
+                        scale: dashboardTileMouse.containsMouse ? 1.055 : 1.0
+
+                        Behavior on scale {
+                            NumberAnimation {
+                                duration: 125
+                                easing.type: Easing.OutCubic
+                            }
+                        }
 
                         Rectangle {
                             anchors {
@@ -4458,17 +5200,18 @@ Item {
 
                         Column {
                             anchors.centerIn: parent
-                            spacing: desktop.p(3)
+                            spacing: desktop.p(2)
 
-                            PremiumIcon {
+                            AppIcon {
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                source: Qt.resolvedUrl(
-                                    "icons/" + modelData.icon
+                                source: root.appIconSource(
+                                    modelData.icon,
+                                    modelData.fallbackIcon
                                 )
-                                size: desktop.p(20)
+                                size: desktop.p(18)
                                 iconOpacity: dashboardTileMouse.containsMouse
                                     ? 1.0
-                                    : 0.88
+                                    : 0.96
                             }
 
                             Text {
@@ -4483,10 +5226,12 @@ Item {
 
                             Text {
                                 anchors.horizontalCenter: parent.horizontalCenter
+                                visible: dashboardSearch.text.trim().length > 0
+                                    && modelData.subtitle.length > 0
                                 text: modelData.subtitle
                                 color: desktop.mutedInk
                                 font.family: "Inter"
-                                font.pixelSize: desktop.p(7.2)
+                                font.pixelSize: desktop.p(6.8)
                             }
                         }
 
@@ -4662,6 +5407,7 @@ PremiumIcon {
                             onClicked: {
                                 root.dashboardWifiMenuOpen =
                                     !root.dashboardWifiMenuOpen
+                                root.dashboardBluetoothMenuOpen = false
 
                                 if (root.dashboardWifiMenuOpen
                                         && desktop.wifiEnabled) {
@@ -4782,7 +5528,16 @@ PremiumIcon {
 
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: desktop.toggleBluetooth()
+                            onClicked: {
+                                root.dashboardBluetoothMenuOpen =
+                                    !root.dashboardBluetoothMenuOpen
+                                root.dashboardWifiMenuOpen = false
+
+                                if (root.dashboardBluetoothMenuOpen
+                                        && !bluetoothReader.running) {
+                                    bluetoothReader.running = true
+                                }
+                            }
                         }
 
                         MouseArea {
@@ -5155,18 +5910,19 @@ PrecisionSessionRow {
     graphite: desktop.graphite
     softInk: desktop.softInk
     mutedInk: desktop.mutedInk
-    helperPath: "/home/alexistissier/.local/bin/precision-session-action"
+    helperPath: "__HOME__/.local/bin/precision-session-action"
 }
                 }
             }
 
 MouseArea {
-    id: dashboardWifiMenuDismissLayer
+    id: dashboardDetailMenuDismissLayer
 
     anchors.fill: parent
     z: 89
 
     visible: root.dashboardWifiMenuOpen
+        || root.dashboardBluetoothMenuOpen
     enabled: visible
 
     acceptedButtons: Qt.AllButtons
@@ -5180,9 +5936,289 @@ MouseArea {
 
     onClicked: function(mouse) {
         root.dashboardWifiMenuOpen = false
+        root.dashboardBluetoothMenuOpen = false
         mouse.accepted = true
     }
 }
+
+            Rectangle {
+                id: dashboardBluetoothMenu
+
+                anchors {
+                    right: dashboardSettings.left
+                    rightMargin: desktop.p(9)
+                    bottom: dashboardSettings.bottom
+                }
+
+                width: desktop.p(178)
+                height: desktop.p(170)
+                radius: desktop.p(10)
+                z: 90
+
+                color: desktop.panelSurface
+                border.width: Math.max(1, desktop.p(0.65))
+                border.color: desktop.panelBorder
+
+                visible: opacity > 0
+                enabled: root.dashboardBluetoothMenuOpen
+                opacity: root.dashboardBluetoothMenuOpen ? 1 : 0
+                scale: root.dashboardBluetoothMenuOpen ? 1 : 0.985
+
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 140
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    z: 1
+                    acceptedButtons: Qt.AllButtons
+                    preventStealing: true
+                    propagateComposedEvents: false
+
+                    onPressed: function(mouse) {
+                        mouse.accepted = true
+                    }
+
+                    onClicked: function(mouse) {
+                        mouse.accepted = true
+                    }
+                }
+
+                Column {
+                    z: 2
+
+                    anchors {
+                        fill: parent
+                        margins: desktop.p(12)
+                    }
+
+                    spacing: desktop.p(7)
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(17)
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: "Bluetooth"
+                            color: desktop.graphite
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(9.0)
+                            font.weight: Font.Medium
+                        }
+
+                        Text {
+                            anchors {
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: "Actualiser"
+                            color: desktop.softInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.1)
+
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -desktop.p(5)
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !desktop.bluetoothBusy
+                                onClicked: {
+                                    if (!bluetoothReader.running)
+                                        bluetoothReader.running = true
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: Math.max(1, desktop.p(0.65))
+                        color: "#52D8CCBC"
+                    }
+
+                    Item {
+                        width: parent.width
+                        height: desktop.p(15)
+
+                        PremiumIcon {
+                            id: dashboardActiveBluetoothIcon
+
+                            anchors {
+                                left: parent.left
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            source: Qt.resolvedUrl("icons/bluetooth.svg")
+                            size: desktop.p(11)
+                            iconOpacity: desktop.bluetoothEnabled ? 0.90 : 0.44
+                        }
+
+                        Text {
+                            anchors {
+                                left: dashboardActiveBluetoothIcon.right
+                                leftMargin: desktop.p(7)
+                                right: parent.right
+                                verticalCenter: parent.verticalCenter
+                            }
+
+                            text: !desktop.bluetoothEnabled
+                                ? "Bluetooth is off"
+                                : (desktop.bluetoothConnectedName.length > 0
+                                    ? desktop.bluetoothConnectedName
+                                    : "No device connected")
+                            color: desktop.bluetoothConnectedName.length > 0
+                                ? desktop.graphite
+                                : desktop.mutedInk
+                            font.family: "Inter"
+                            font.pixelSize: desktop.p(7.9)
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: desktop.bluetoothEnabled
+                                ? Qt.ArrowCursor
+                                : Qt.PointingHandCursor
+                            enabled: !desktop.bluetoothEnabled
+                                && !desktop.bluetoothBusy
+                            onClicked: desktop.toggleBluetooth()
+                        }
+                    }
+
+                    ListView {
+                        id: dashboardBluetoothDeviceList
+
+                        width: parent.width
+                        height: desktop.p(88)
+                        clip: true
+                        spacing: desktop.p(1)
+                        model: desktop.bluetoothDevices
+                        interactive: contentHeight > height
+                        visible: desktop.bluetoothEnabled
+
+                        delegate: Item {
+                            required property var modelData
+
+                            width: dashboardBluetoothDeviceList.width
+                            height: desktop.p(22)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: desktop.p(5)
+                                color: dashboardBluetoothDeviceMouse.containsMouse
+                                    ? "#3AD8CCBC"
+                                    : "transparent"
+                            }
+
+                            PremiumIcon {
+                                id: dashboardBluetoothDeviceIcon
+
+                                anchors {
+                                    left: parent.left
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                source: Qt.resolvedUrl("icons/bluetooth.svg")
+                                size: desktop.p(10)
+                                iconOpacity: modelData.connected ? 0.95 : 0.68
+                            }
+
+                            Column {
+                                anchors {
+                                    left: dashboardBluetoothDeviceIcon.right
+                                    leftMargin: desktop.p(6)
+                                    right: dashboardBluetoothDeviceState.left
+                                    rightMargin: desktop.p(7)
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                spacing: desktop.p(0.5)
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.name
+                                    color: modelData.connected
+                                        ? desktop.graphite
+                                        : desktop.softInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(7.5)
+                                    font.weight: modelData.connected
+                                        ? Font.Medium
+                                        : Font.Normal
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.connected
+                                        ? "Connecté"
+                                        : "Appairé"
+                                    color: desktop.mutedInk
+                                    font.family: "Inter"
+                                    font.pixelSize: desktop.p(6.1)
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Text {
+                                id: dashboardBluetoothDeviceState
+
+                                anchors {
+                                    right: parent.right
+                                    verticalCenter: parent.verticalCenter
+                                }
+
+                                text: modelData.connected ? "Déconnecter" : "Connecter"
+                                color: desktop.mutedInk
+                                font.family: "Inter"
+                                font.pixelSize: desktop.p(6.1)
+                            }
+
+                            MouseArea {
+                                id: dashboardBluetoothDeviceMouse
+
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !desktop.bluetoothBusy
+                                onClicked: desktop.toggleBluetoothDevice(
+                                    modelData.address,
+                                    modelData.connected
+                                )
+                            }
+                        }
+                    }
+
+                    Text {
+                        width: parent.width
+                        height: desktop.p(12)
+                        visible: desktop.bluetoothMessage.length > 0
+                        text: desktop.bluetoothMessage
+                        color: desktop.mutedInk
+                        font.family: "Inter"
+                        font.pixelSize: desktop.p(6.6)
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
 
 Rectangle {
     id: dashboardWifiMenu
@@ -5354,7 +6390,9 @@ Rectangle {
             height: desktop.p(88)
             clip: true
             spacing: desktop.p(1)
-            model: desktop.wifiNetworks
+            model: desktop.wifiNetworks.filter(function(network) {
+                return !network.connected
+            })
             interactive: contentHeight > height
             visible: desktop.wifiEnabled
 
@@ -5494,62 +6532,42 @@ Rectangle {
         color: "transparent"
 
 function filteredItems() {
-    const query = launcherSearch.text.trim().toLowerCase()
-    const baseItems = root.launcherAllMode || query.length > 0
-        ? desktop.allAppItems
-        : desktop.appItems
-
-    if (query.length === 0)
-        return baseItems
-
-    const matches = baseItems.filter(function(item) {
-        const title = (item.title || "").toLowerCase()
-        const subtitle = (item.subtitle || "").toLowerCase()
-        const lookup = (item.lookup || "").toLowerCase()
-
-        return title.indexOf(query) !== -1
-            || subtitle.indexOf(query) !== -1
-            || lookup.indexOf(query) !== -1
-    })
-
-    return root.launcherAllMode ? matches : matches.slice(0, 4)
+    return desktop.smartSearchItems(
+        launcherSearch.text,
+        root.launcherAllMode ? 0 : 4,
+        root.launcherAllMode
+    )
 }
 
 function launchItem(item) {
+    desktop.recordSearchUse(item)
+    const handled = desktop.executeSearchAction(item)
 
-    if (item.action === "precision-settings") {
-        root.openSettings(0)
-        return
-    }
-    if (item.desktopFile && item.desktopFile.length > 0) {
-        Quickshell.execDetached({
-            command: ["gio", "launch", item.desktopFile]
-        })
-    } else {
-        const entry = DesktopEntries.heuristicLookup(item.lookup)
-
-        if (entry !== null) {
-            entry.execute()
-        } else {
+    if (!handled) {
+        if (item.desktopFile && item.desktopFile.length > 0) {
             Quickshell.execDetached({
-                command: item.fallback
+                command: ["gio", "launch", item.desktopFile]
             })
+        } else {
+            const entry = DesktopEntries.heuristicLookup(item.lookup)
+
+            if (entry !== null) {
+                entry.execute()
+            } else if (item.fallback && item.fallback.length > 0) {
+                Quickshell.execDetached({
+                    command: item.fallback
+                })
+            }
         }
     }
 
+    launcherSearch.text = ""
     root.closeLauncher()
 }
 
-        Shortcut {
-            enabled: root.launcherOpen
-            context: Qt.ApplicationShortcut
-            sequence: "Escape"
-            onActivated: root.closeLauncher()
-        }
-
         Rectangle {
             anchors.fill: parent
-            color: "#52000000"
+            color: "#24000000"
         }
 
         MouseArea {
@@ -5561,7 +6579,7 @@ Rectangle {
     id: allAppsBackdrop
     anchors.fill: parent
     visible: root.launcherAllMode
-    color: "#59000000"
+    color: "#30000000"
 
     MouseArea {
         anchors.fill: parent
@@ -5569,8 +6587,42 @@ Rectangle {
     }
 }
 
-        Rectangle {
+                Rectangle {
+            id: launcherCardShadowSource
+
+            x: launcherCard.x
+            y: launcherCard.y
+            width: launcherCard.width
+            height: launcherCard.height
+            radius: launcherCard.radius
+            scale: launcherCard.scale
+
+            visible: false
+            layer.enabled: true
+        }
+
+        MultiEffect {
+            source: launcherCardShadowSource
+            anchors.fill: launcherCardShadowSource
+            z: 2
+
+            visible: root.launcherOpen
+            autoPaddingEnabled: true
+
+            shadowEnabled: true
+            shadowColor: "#65000000"
+            shadowOpacity: 0.24
+            shadowBlur: 1.0
+            blurMax: 34
+            shadowHorizontalOffset: 0
+            shadowVerticalOffset: desktop.p(5)
+            shadowScale: 1.01
+        }
+
+Rectangle {
             id: launcherCard
+
+            z: 3
 
             anchors {
                 horizontalCenter: parent.horizontalCenter
@@ -5579,13 +6631,31 @@ Rectangle {
             }
 
             width: root.launcherAllMode ? desktop.p(620) : desktop.p(438)
-            height: root.launcherAllMode ? desktop.p(390) : desktop.p(123)
+            height: root.launcherAllMode ? desktop.p(390) : desktop.p(106)
             radius: desktop.p(10)
 
             color: desktop.panelSurface
             border.width: Math.max(1, desktop.p(0.7))
             border.color: desktop.panelBorder
             clip: true
+
+            opacity: root.launcherOpen ? 1 : 0
+            scale: root.launcherOpen ? 1 : 0.975
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 155
+                    easing.type: Easing.OutCubic
+                }
+            }
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 180
+                    easing.type: Easing.OutBack
+                    easing.overshoot: 0.55
+                }
+            }
 
             MouseArea {
                 anchors.fill: parent
@@ -5604,7 +6674,9 @@ Rectangle {
                     right: parent.right
                 }
 
-                height: desktop.p(45)
+                height: root.launcherAllMode
+                    ? desktop.p(45)
+                    : desktop.p(40)
 
                 PremiumIcon {
                     anchors {
@@ -5692,7 +6764,9 @@ Rectangle {
                     left: parent.left
                     right: parent.right
                     top: parent.top
-                    topMargin: desktop.p(45)
+                    topMargin: root.launcherAllMode
+                        ? desktop.p(45)
+                        : desktop.p(40)
                 }
 
                 height: Math.max(1, desktop.p(0.7))
@@ -5707,7 +6781,7 @@ Rectangle {
                 }
 
                 visible: launcherWindow.filteredItems().length === 0
-                text: "No matching application"
+                text: "No matching application or command"
                 color: desktop.mutedInk
                 font.family: "Inter"
                 font.pixelSize: desktop.p(8)
@@ -5718,7 +6792,9 @@ Item {
         left: parent.left
         right: parent.right
         top: parent.top
-        topMargin: desktop.p(46)
+        topMargin: root.launcherAllMode
+            ? desktop.p(46)
+            : desktop.p(41)
         bottom: parent.bottom
     }
 
@@ -5727,7 +6803,7 @@ Item {
         anchors {
             horizontalCenter: parent.horizontalCenter
             bottom: parent.bottom
-            bottomMargin: desktop.p(12)
+            bottomMargin: desktop.p(8)
         }
         spacing: desktop.p(31)
 
@@ -5738,21 +6814,30 @@ Item {
                 id: launcherTile
                 required property var modelData
                 width: desktop.p(64)
-                height: desktop.p(56)
+                height: desktop.p(46)
+                scale: quickTileMouse.containsMouse ? 1.055 : 1.0
+
+                Behavior on scale {
+                    NumberAnimation {
+                        duration: 125
+                        easing.type: Easing.OutCubic
+                    }
+                }
 
                 Column {
                     anchors.centerIn: parent
-                    spacing: desktop.p(3)
+                    spacing: desktop.p(2)
 
-                    PremiumIcon {
+                    AppIcon {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        source: Qt.resolvedUrl(
-                            "icons/" + modelData.icon
+                        source: root.appIconSource(
+                            modelData.icon,
+                            modelData.fallbackIcon
                         )
-                        size: desktop.p(20)
+                        size: desktop.p(18)
                         iconOpacity: quickTileMouse.containsMouse
                             ? 1
-                            : 0.88
+                            : 0.96
                     }
 
                     Text {
@@ -5765,10 +6850,12 @@ Item {
 
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
+                        visible: launcherSearch.text.trim().length > 0
+                            && modelData.subtitle.length > 0
                         text: modelData.subtitle
                         color: desktop.mutedInk
                         font.family: "Inter"
-                        font.pixelSize: desktop.p(7.2)
+                        font.pixelSize: desktop.p(6.8)
                     }
                 }
 
@@ -5798,6 +6885,12 @@ Item {
         cellHeight: desktop.p(72)
         model: launcherWindow.filteredItems()
 
+        // Les événements restent gérés explicitement afin d'éviter le
+        // défilement natif trop lent du GridView. Le facteur est volontairement
+        // faible car le pavé tactile est également ralenti dans Niri.
+        readonly property real wheelRowsPerNotch: 0.55
+        readonly property real pixelWheelMultiplier: 0.55
+
         ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
         }
@@ -5807,6 +6900,14 @@ Item {
             required property var modelData
             width: allAppsGrid.cellWidth
             height: allAppsGrid.cellHeight
+            scale: allAppsMouse.containsMouse ? 1.035 : 1.0
+
+            Behavior on scale {
+                NumberAnimation {
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+            }
 
             Rectangle {
                 anchors {
@@ -5815,8 +6916,12 @@ Item {
                 }
                 radius: desktop.p(7)
                 color: allAppsMouse.containsMouse
-                    ? "#42D8CCBC"
+                    ? "#58D8CCBC"
                     : "transparent"
+                border.width: allAppsMouse.containsMouse
+                    ? Math.max(1, desktop.p(0.45))
+                    : 0
+                border.color: "#48A89E92"
             }
 
             Column {
@@ -5826,13 +6931,14 @@ Item {
                 }
                 spacing: desktop.p(4)
 
-                PremiumIcon {
+                AppIcon {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    source: Qt.resolvedUrl(
-                        "icons/" + modelData.icon
+                    source: root.appIconSource(
+                        modelData.icon,
+                        modelData.fallbackIcon
                     )
                     size: desktop.p(22)
-                    iconOpacity: 0.86
+                    iconOpacity: 0.96
                 }
 
                 Text {
@@ -5863,6 +6969,49 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: launcherWindow.launchItem(modelData)
             }
+        }
+    }
+
+    MouseArea {
+        id: allAppsWheelArea
+
+        visible: root.launcherAllMode
+        anchors.fill: allAppsGrid
+        z: 100
+        acceptedButtons: Qt.NoButton
+
+        onWheel: function(wheel) {
+            let movement = 0
+
+            if (wheel.angleDelta.y !== 0) {
+                movement = (wheel.angleDelta.y / 120)
+                    * allAppsGrid.cellHeight
+                    * allAppsGrid.wheelRowsPerNotch
+            } else if (wheel.pixelDelta.y !== 0) {
+                movement = wheel.pixelDelta.y
+                    * allAppsGrid.pixelWheelMultiplier
+            }
+
+            if (movement === 0)
+                return
+
+            const minimum = allAppsGrid.originY
+            const maximum = Math.max(
+                minimum,
+                allAppsGrid.originY
+                    + allAppsGrid.contentHeight
+                    - allAppsGrid.height
+            )
+
+            allAppsGrid.contentY = Math.max(
+                minimum,
+                Math.min(
+                    maximum,
+                    allAppsGrid.contentY - movement
+                )
+            )
+
+            wheel.accepted = true
         }
     }
 }
@@ -6043,13 +7192,14 @@ Keys.onReleased: function(event) {
                                         ? "#DDFBF9F5"
                                         : "#B8FBF9F5"
 
-                                    PremiumIcon {
+                                    AppIcon {
                                         anchors.centerIn: parent
-                                        source: Qt.resolvedUrl(
-                                            "icons/" + modelData.icon
+                                        source: root.appIconSource(
+                                            modelData.icon,
+                                            modelData.fallbackIcon
                                         )
                                         size: desktop.p(20)
-                                        iconOpacity: 0.92
+                                        iconOpacity: 1.0
                                     }
                                 }
 
@@ -6119,12 +7269,13 @@ Keys.onReleased: function(event) {
         visible: root.osdWindowActive
 
         anchors {
-            top: true
+            bottom: true
             left: true
             right: true
         }
 
-        implicitHeight: desktop.s(92)
+        // Espace suffisant pour ne pas couper le flou du shader.
+        implicitHeight: desktop.s(116)
         exclusionMode: ExclusionMode.Ignore
         focusable: false
 
@@ -6134,24 +7285,74 @@ Keys.onReleased: function(event) {
 
         color: "transparent"
 
+        // Silhouette invisible utilisée uniquement comme source du shader.
+        Rectangle {
+            id: osdShadowSource
+
+            x: osdCard.x
+            y: osdCard.y
+            width: osdCard.width
+            height: osdCard.height
+            radius: osdCard.radius
+
+            color: osdCard.color
+            visible: false
+            layer.enabled: true
+        }
+
+        // Véritable ombre floutée continue : aucune couche en escalier.
+        MultiEffect {
+            id: osdShadowEffect
+
+            source: osdShadowSource
+            anchors.fill: osdShadowSource
+            z: 1
+
+            visible: root.osdShown
+            autoPaddingEnabled: true
+
+            shadowEnabled: true
+            shadowColor: "#70000000"
+            shadowOpacity: 0.24
+            shadowBlur: 1.0
+            blurMax: 40
+            blurMultiplier: 1.0
+            shadowHorizontalOffset: 0
+            shadowVerticalOffset: desktop.p(3.5)
+            shadowScale: 1.015
+
+            opacity: root.osdShown ? 1 : 0
+
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 145
+                    easing.type: Easing.OutCubic
+                }
+            }
+        }
+
         Rectangle {
             id: osdCard
 
             anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: root.osdShown
+                ? desktop.s(34)
+                : desktop.s(28)
 
-            y: root.osdShown ? desktop.s(40) : desktop.s(33)
-            width: desktop.p(178)
-            height: desktop.p(36)
-            radius: desktop.p(10)
+            z: 2
+            width: desktop.p(170)
+            height: desktop.p(34)
+            radius: desktop.p(9.5)
 
-            color: "#F4FBF9F5"
-            border.width: Math.max(1, desktop.p(0.7))
-            border.color: "#70CFC4B6"
+            color: "#F7F7F7"
+            border.width: Math.max(1, desktop.p(0.55))
+            border.color: "#22000000"
             opacity: root.osdShown ? 1 : 0
 
-            Behavior on y {
+            Behavior on anchors.bottomMargin {
                 NumberAnimation {
-                    duration: 145
+                    duration: 165
                     easing.type: Easing.OutCubic
                 }
             }
@@ -6161,6 +7362,22 @@ Keys.onReleased: function(event) {
                     duration: 145
                     easing.type: Easing.OutCubic
                 }
+            }
+
+            Rectangle {
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    topMargin: desktop.p(1)
+                    leftMargin: desktop.p(8)
+                    rightMargin: desktop.p(8)
+                }
+
+                height: Math.max(1, desktop.p(0.45))
+                radius: height / 2
+                color: "#5AFFFFFF"
+                opacity: 0.55
             }
 
             PremiumIcon {
@@ -6177,62 +7394,31 @@ Keys.onReleased: function(event) {
                         ? "icons/brightness.svg"
                         : "icons/volume.svg"
                 )
-                size: desktop.p(14)
-                iconOpacity: 0.90
+                size: desktop.p(16)
+                iconOpacity: 0.80
             }
 
-            Column {
+            Rectangle {
+                id: osdLevelBar
+
                 anchors {
                     left: osdIcon.right
-                    leftMargin: desktop.p(10)
-                    right: osdPercent.left
-                    rightMargin: desktop.p(10)
+                    leftMargin: desktop.p(12)
+                    right: parent.right
+                    rightMargin: desktop.p(14)
                     verticalCenter: parent.verticalCenter
                 }
 
-                spacing: desktop.p(4)
-
-                Text {
-                    text: root.osdKind === "brightness"
-                        ? "Brightness"
-                        : "Volume"
-                    color: desktop.graphite
-                    font.family: "Inter"
-                    font.pixelSize: desktop.p(7.4)
-                    font.weight: Font.Normal
-                }
+                height: desktop.p(3)
+                radius: height / 2
+                color: "#D1D1D1"
 
                 Rectangle {
-                    width: parent.width
-                    height: desktop.p(1.9)
-                    radius: height / 2
-                    color: "#C9C0B6"
-
-                    Rectangle {
-                        width: parent.width * root.osdLevel
-                        height: parent.height
-                        radius: parent.radius
-                        color: desktop.softInk
-                    }
+                    width: parent.width * root.osdLevel
+                    height: parent.height
+                    radius: parent.radius
+                    color: "#686868"
                 }
-            }
-
-            Text {
-                id: osdPercent
-
-                anchors {
-                    right: parent.right
-                    rightMargin: desktop.p(12)
-                    verticalCenter: parent.verticalCenter
-                }
-
-                width: desktop.p(27)
-                text: Math.round(root.osdLevel * 100) + "%"
-                horizontalAlignment: Text.AlignRight
-                color: desktop.graphite
-                font.family: "Inter"
-                font.pixelSize: desktop.p(8.1)
-                font.weight: Font.Normal
             }
         }
     }
