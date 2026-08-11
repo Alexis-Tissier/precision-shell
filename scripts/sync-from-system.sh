@@ -20,6 +20,7 @@ rsync -a --delete \
   --exclude='wifi-cache.json' \
   --exclude='wallpaper.jpg' \
   --exclude='wallpaper.png' \
+  --exclude='.horizon-launch-backup-*/' \
   --exclude='.horizon-backup-*/' \
   --exclude='.horizon-fix-backup-*/' \
   "$HOME/.config/quickshell/precision-shell/" \

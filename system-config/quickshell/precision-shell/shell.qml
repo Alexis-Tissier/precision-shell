@@ -2981,8 +2981,8 @@ Rectangle {
                 {
                     "title": "Horizon",
                     "icon": "horizon.svg",
-                    "desktopFile": "__HOME__/.local/share/applications/horizon.desktop",
-                    "lookup": "Horizon",
+                    "desktopFile": "",
+                    "lookup": "",
                     "fallback": ["__HOME__/.local/bin/horizon"]
                 }
 
@@ -4857,8 +4857,8 @@ Rectangle {
                 {
                     "title": "Horizon",
                     "icon": "horizon.svg",
-                    "desktopFile": "__HOME__/.local/share/applications/horizon.desktop",
-                    "lookup": "Horizon",
+                    "desktopFile": "",
+                    "lookup": "",
                     "fallback": ["__HOME__/.local/bin/horizon"]
                 }
 
